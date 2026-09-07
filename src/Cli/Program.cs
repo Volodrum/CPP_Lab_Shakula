@@ -2,11 +2,11 @@
 using System.Text;
 using System.Text.Json;
 
-// Забезпечуємо коректне відображення кирилиці в консолі Windows
+
 Console.OutputEncoding = Encoding.UTF8;
 
-var domain = "Склад (товари, партії, залишки, переміщення)";
-var student = "Прізвище Ім'я, група ___";
+var domain = "Бібліотека (видання, примірники, читачі, видачі та повернення)";
+var student = "Шакула Володимир, група ___";
 
 var info = new
 {
