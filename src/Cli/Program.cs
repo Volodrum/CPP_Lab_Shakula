@@ -1,12 +1,14 @@
 ﻿using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Encodings.Web;
+using System.Text.Unicode;
 
 
 Console.OutputEncoding = Encoding.UTF8;
 
 var domain = "Бібліотека (видання, примірники, читачі, видачі та повернення)";
-var student = "Шакула Володимир, група ___";
+var student = "Шакула Володимир, група ФЕІ-32с";
 
 var info = new
 {
@@ -24,7 +26,10 @@ var info = new
 
 if (args.Contains("--json"))
 {
-    var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+    var jsonOptions = new JsonSerializerOptions { 
+        WriteIndented = true, 
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All) 
+    };
     Console.WriteLine(JsonSerializer.Serialize(info, jsonOptions));
 }
 else
