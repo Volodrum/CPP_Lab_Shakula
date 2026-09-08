@@ -1,49 +1,46 @@
-﻿using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Json;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Text.Unicode;
-
+using Core;
 
 Console.OutputEncoding = Encoding.UTF8;
 
-var domain = "Бібліотека (видання, примірники, читачі, видачі та повернення)";
-var student = "Шакула Володимир, група ФЕІ-32с";
+EnvironmentReport report = EnvironmentInfo.Collect();
 
-var info = new
-{
-    Title = "CrossApp – практикум з крос-платформного програмування",
-    Student = student,
-    OsDescription = RuntimeInformation.OSDescription,
-    OsVersion = Environment.OSVersion.ToString(),
-    ProcessArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
-    DotNetVersion = Environment.Version.ToString(),
-    FrameworkDescription = RuntimeInformation.FrameworkDescription,
-    AppBaseDirectory = AppContext.BaseDirectory,
-    CurrentDirectory = Environment.CurrentDirectory,
-    Domain = domain
-};
+const string student = "Шакула Володимир, група ФЕІ-32с";
+const string domain = "Бібліотека (видання, примірники, читачі, видачі та повернення)";
 
 if (args.Contains("--json"))
 {
-    var jsonOptions = new JsonSerializerOptions { 
-        WriteIndented = true, 
-        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All) 
+    var jsonOptions = new JsonSerializerOptions
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
     };
-    Console.WriteLine(JsonSerializer.Serialize(info, jsonOptions));
+
+    var outputData = new
+    {
+        Title = "CrossApp – Інформація про середовище",
+        Student = student,
+        Domain = domain,
+        Environment = report
+    };
+
+    Console.WriteLine(JsonSerializer.Serialize(outputData, jsonOptions));
 }
 else
 {
-    Console.WriteLine(info.Title);
-    Console.WriteLine($"Студент: {info.Student}");
-    Console.WriteLine(new string('-', 60));
-    Console.WriteLine($"ОС (OSDescription)     : {info.OsDescription}");
-    Console.WriteLine($"ОС (Environment)       : {info.OsVersion}");
-    Console.WriteLine($"Архітектура процесу    : {info.ProcessArchitecture}");
-    Console.WriteLine($"Версія .NET (CLR)      : {info.DotNetVersion}");
-    Console.WriteLine($"Runtime                : {info.FrameworkDescription}");
-    Console.WriteLine($"Каталог застосунку     : {info.AppBaseDirectory}");
-    Console.WriteLine($"Поточний каталог       : {info.CurrentDirectory}");
-    Console.WriteLine(new string('-', 60));
-    Console.WriteLine($"Предметна область      : {info.Domain}");
+    Console.WriteLine("CrossApp – Інформація про середовище");
+    Console.WriteLine($"Студент: {student}");
+    Console.WriteLine(new string('-', 56));
+    Console.WriteLine($"ОС (OSDescription)  : {report.OsDescription}");
+    Console.WriteLine($"Runtime             : {report.FrameworkDescription}");
+    Console.WriteLine($"Архітектура процесу : {report.ProcessArchitecture}");
+    Console.WriteLine($"RID (визначено)     : {report.DetectedRid}");
+    Console.WriteLine($"RID (від .NET)      : {report.ReportedRid}");
+    Console.WriteLine($"Каталог застосунку  : {report.BaseDirectory}");
+    Console.WriteLine($"Цільова збірка Core : {report.BuildTargetNote}");
+    Console.WriteLine(new string('-', 56));
+    Console.WriteLine($"Предметна область   : {domain}");
 }

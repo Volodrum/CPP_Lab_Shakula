@@ -455,3 +455,7 @@ $RECYCLE.BIN/
 
 bin/
 obj/
+pub/
+publish/
+[Pp]ub/
+[Pp]ublish/
