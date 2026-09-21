@@ -1,8 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Multi-targeting під net10.0 та net8.0 (якщо SDK дозволяє) -->
-    <!-- Якщо targeting pack для net8.0 відсутній, поверніть <TargetFramework>net10.0</TargetFramework> -->
+    <!-- Multi-targeting під net10.0 та net8.0 -->
     <TargetFrameworks>net10.0;net8.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

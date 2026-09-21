@@ -1,0 +1,44 @@
+[
+  {
+    "id": "B-101",
+    "isbn": "978-0-13-235088-4",
+    "title": "Clean Code",
+    "year": 2008,
+    "author": "Robert C. Martin"
+  },
+  {
+    "id": "B-102",
+    "isbn": "978-0-201-61622-4",
+    "title": "The Pragmatic Programmer",
+    "year": 1999,
+    "author": "Andrew Hunt"
+  },
+  {
+    "id": "B-103",
+    "isbn": "978-0-13-449416-6",
+    "title": "Clean Architecture",
+    "year": 2017,
+    "author": "Robert C. Martin"
+  },
+  {
+    "id": "B-104",
+    "isbn": "978-0-13-597444-5",
+    "title": "CLR via C#",
+    "year": 2012,
+    "author": "Jeffrey Richter"
+  },
+  {
+    "id": "B-105",
+    "isbn": "978-1-61729-453-2",
+    "title": "C# in Depth",
+    "year": 2019,
+    "author": "Jon Skeet"
+  },
+  {
+    "id": "B-106",
+    "isbn": "978-0-000-00000-0",
+    "title": "Книга майбутнього",
+    "year": 2099,
+    "author": "Невідомий"
+  }
+]
