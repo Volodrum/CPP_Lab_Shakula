@@ -21,6 +21,11 @@ if (args.Length > 0 && (args[0] == "--info" || args[0] == "--env"))
     return 0;
 }
 
+if (args.Length > 0 && args[0] == "--domain")
+{
+    return DomainDemo.Run(args.Length > 1 ? args[1] : Path.Combine("data", "books_domain.csv"));
+}
+
 string path = args.Length > 0 ? args[0] : Path.Combine("data", "sample.csv");
 
 if (!File.Exists(path))
