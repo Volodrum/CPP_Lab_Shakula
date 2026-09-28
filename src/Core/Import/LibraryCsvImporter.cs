@@ -6,7 +6,7 @@ namespace Core.Import;
 
 public static class LibraryCsvImporter
 {
-    private const char Separator = ',';
+    private const char Separator = ';';
 
     public static ImportResult<LibraryItemDto> Load(string path)
     {
