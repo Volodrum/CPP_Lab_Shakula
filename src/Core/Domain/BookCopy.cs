@@ -3,7 +3,7 @@ using Core.Dto;
 namespace Core.Domain;
 
 // Фізичний примірник видання: або на полиці, або виданий.
-public sealed class BookCopy
+public sealed class BookCopy : ILibraryEntity
 {
     public string Id { get; }
     public string Isbn { get; }

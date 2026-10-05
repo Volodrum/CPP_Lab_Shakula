@@ -6,7 +6,7 @@ using Core.Services;
 // Лабораторна 4: демонстрація доменної моделі (запуск: dotnet run --project src/Cli -- --domain).
 internal static class DomainDemo
 {
-    public static int Run(string importPath)
+    public static int Run(string importPath, LendingService desk)
     {
         Console.WriteLine("=== Сценарій 1: успіх ===");
         Book book = Book.Create("B-001", " 978-0-13-235088-4 ", "Чистий код", 2008, "Роберт Мартін");
@@ -67,26 +67,26 @@ internal static class DomainDemo
         Console.WriteLine();
 
         Console.WriteLine($"=== Додаткове 2: не більше {LendingService.MaxActiveLoansPerReader} незакритих видач на читача ===");
-        var desk = new LendingService();
+        // З тижня 5 сервіс працює через сховище: примірники й видачі лежать у ньому, а не в полях сервісу.
+        Book deskBook = desk.AddBook(book.Isbn, book.Title, book.Year, book.Author);
         var day = new DateOnly(2026, 9, 1);
+        var loans = new List<Loan>();
         for (int i = 1; i <= LendingService.MaxActiveLoansPerReader; i++)
-            desk.IssueCopy(BookCopy.Register($"C-10{i}", book.Isbn), "R-007", day);
+            loans.Add(desk.IssueCopy(desk.RegisterCopy(deskBook.Isbn).Id, "R-007", day));
         Console.WriteLine($" Читач R-007 має незакритих видач: {desk.CountActiveLoans("R-007")}");
-        BookCopy sixth = BookCopy.Register("C-106", book.Isbn);
-        TryDo("шоста видача", () => desk.IssueCopy(sixth, "R-007", day));
+        BookCopy sixth = desk.RegisterCopy(deskBook.Isbn);
+        TryDo("шоста видача", () => desk.IssueCopy(sixth.Id, "R-007", day));
         Console.WriteLine($" Примірник {sixth.Id} після відмови: {(sixth.IsIssued ? "виданий" : "на полиці")}");
-        desk.ReturnCopy("L-001", day.AddDays(7));
-        Console.WriteLine($" Після повернення L-001: {desk.IssueCopy(sixth, "R-007", day.AddDays(7))}");
+        desk.ReturnCopy(loans[0].Id, day.AddDays(7));
+        Console.WriteLine($" Після повернення {loans[0].Id}: {desk.IssueCopy(sixth.Id, "R-007", day.AddDays(7))}");
         Console.WriteLine();
 
         Console.WriteLine("=== Додаткове 3: переходи стану Open → Lost → Closed ===");
-        Loan lostLoan = desk.Loans[1];
-        lostLoan.MarkLost();
-        Console.WriteLine($" {lostLoan}");
-        TryDo("повторна позначка «втрачено»", lostLoan.MarkLost);
-        lostLoan.Close(day.AddDays(30));
-        Console.WriteLine($" {lostLoan} (примірник знайшовся)");
-        TryDo("втрата вже закритої видачі", lostLoan.MarkLost);
+        string lostId = loans[1].Id;
+        Console.WriteLine($" {desk.ReportLost(lostId)}");
+        TryDo("повторна позначка «втрачено»", () => desk.ReportLost(lostId));
+        Console.WriteLine($" {desk.ReturnCopy(lostId, day.AddDays(30))} (примірник знайшовся)");
+        TryDo("втрата вже закритої видачі", () => desk.ReportLost(lostId));
 
         return 0;
     }

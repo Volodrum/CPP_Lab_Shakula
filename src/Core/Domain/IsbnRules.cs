@@ -9,7 +9,7 @@ internal static class IsbnRules
             throw new ArgumentException("ISBN не може бути порожнім", paramName);
 
         string trimmed = isbn.Trim().ToUpperInvariant();
-        string compact = trimmed.Replace("-", "").Replace(" ", "");
+        string compact = Compact(trimmed);
 
         bool valid = compact.Length switch
         {
@@ -24,4 +24,6 @@ internal static class IsbnRules
 
         return trimmed;
     }
+
+    public static string Compact(string isbn) => isbn.Replace("-", "").Replace(" ", "").ToUpperInvariant();
 }

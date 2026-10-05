@@ -3,7 +3,7 @@ using Core.Dto;
 namespace Core.Domain;
 
 // Видання в каталозі. Незмінне після створення: ISBN, назва і рік — це факт про книгу.
-public sealed class Book
+public sealed class Book : ILibraryEntity
 {
     public const int MinYear = 1450;
 
@@ -50,6 +50,10 @@ public sealed class Book
         ArgumentNullException.ThrowIfNull(dto);
         return Create(dto.Id, dto.Isbn, dto.Title, dto.Year, dto.Author);
     }
+
+    // Той самий ISBN, записаний з дефісами чи без: «978-0-13-235088-4» = «9780132350884».
+    public bool HasIsbn(string? isbn) =>
+        isbn is not null && IsbnRules.Compact(isbn) == IsbnRules.Compact(Isbn);
 
     public override string ToString() =>
         $"{Id} [{Isbn}] «{Title}», {Year}" + (Author is null ? "" : $" — {Author}");

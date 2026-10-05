@@ -3,7 +3,7 @@ using Core.Dto;
 namespace Core.Domain;
 
 // Видача примірника читачу. Стан змінюється лише переходами Open → Lost → Closed.
-public sealed class Loan
+public sealed class Loan : ILibraryEntity
 {
     public string Id { get; }
     public BookCopy Copy { get; }
