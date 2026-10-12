@@ -2,6 +2,7 @@ using System.Text;
 using Core;
 using Core.Abstractions;
 using Core.Domain;
+using Core.Events;
 using Core.Services;
 using Core.Storage;
 
@@ -22,95 +23,106 @@ switch (args)
         return ImportDemo.Run(file);
 }
 
-// ---------- Лабораторна 5: composition root — єдине місце, де обирається реалізація сховища ----------
+// ---------- Composition root (лаб. 5): єдине місце, де обирається реалізація сховища ----------
 string dataPath = Path.Combine(AppContext.BaseDirectory, "data", "library.json");
 IBookStore store = StoreFactory.Create(args, dataPath); // --file → FileBookStore, інакше InMemoryBookStore; --cache → декоратор
-var service = new LendingService(store);
 
 Console.WriteLine($"Сховище: {(store is CachingBookStore ? store.ToString() : store.GetType().Name)}");
 if (args.Contains("--file"))
     Console.WriteLine($"Файл: {dataPath} ({(File.Exists(dataPath) ? "є з попереднього запуску" : "ще не створено")})");
 Console.WriteLine();
 
-const string DemoIsbn = "978-0-13-235088-4";
+if (args.Contains("--service"))
+    return ServiceDemo.Run(new LendingService(store), store);
+
+if (args.Contains("--sinks")) // лаб. 6, дод. завдання 1: одержувачі сповіщень через конструктор замість події
+{
+    string sinkLogPath = Path.Combine(AppContext.BaseDirectory, "logs", "sinks.log");
+    return SinkDemo.Run(new LendingService(store, new CompositeSink(new ConsoleSink(), new FileSink(sinkLogPath))), sinkLogPath);
+}
+
+var service = new LendingService(store);
+
+// ---------- Лабораторна 6: доменні події ----------
+var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "app.log");
+Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+Console.WriteLine($"Журнал: {logPath}");
+Console.WriteLine();
+
+int logged = 0; // скільки рядків цей запуск дописав у файл (локальна функція теж замикається на змінну)
+
+// Підписник 1: локальна функція — стале ім'я, тож пізніше можна зробити -= тим самим обробником.
+void OnLibraryChanged(object? sender, LibraryChangedEventArgs e)
+{
+    string line = ChangeLog.Format(e);
+    Console.WriteLine($" {line}");
+    try
+    {
+        File.AppendAllText(logPath, line + Environment.NewLine);
+        logged++;
+    }
+    catch (IOException ex) // збій журналу не повинен зламати бізнес-операцію, що вже відбулась
+    {
+        Console.WriteLine($" ! журнал недоступний: {ex.Message}");
+    }
+}
+
+int changes = 0;
 var today = DateOnly.FromDateTime(DateTime.Today);
 
-Console.WriteLine("=== 1. Додати: видання + 2 примірники ===");
-Book book = service.FindByIsbn(DemoIsbn) ?? service.AddBook(DemoIsbn, "Чистий код", 2008, "Роберт Мартін");
+Console.WriteLine("=== 1. Підписка: локальна функція (консоль + файл), лямбда-лічильник, тимчасова лямбда ===");
+service.Changed += OnLibraryChanged;
+service.Changed += (_, _) => changes++; // підписник 2: замикання над локальною змінною changes
+
+// Підписник 3: лямбда, збережена у змінній, — лише щоб показати порядок виклику і відписку лямбди.
+EventHandler<LibraryChangedEventArgs> orderProbe =
+    (_, e) => Console.WriteLine($"   └ 3-й підписник: {e.Kind}; лічильник (2-й) уже = {changes}");
+service.Changed += orderProbe;
+Console.WriteLine();
+
+Console.WriteLine("=== 2. Успішні операції: кожна дає рівно одну подію ===");
+const string DemoIsbn = "978-0-13-595705-9";
+Book book = service.FindByIsbn(DemoIsbn) ?? service.AddBook(DemoIsbn, "Прагматичний програміст, 2-ге вид.", 2019, "Девід Томас");
+service.Changed -= orderProbe; // та сама змінна → той самий делегат → відписка спрацьовує
 BookCopy first = service.RegisterCopy(book.Isbn);
 BookCopy second = service.RegisterCopy(book.Isbn);
-Console.WriteLine($" {book}");
-Console.WriteLine($" + {first}");
-Console.WriteLine($" + {second}");
-Console.WriteLine();
-
-Console.WriteLine("=== 2. Змінити: видача примірника ===");
 Loan loan = service.IssueCopy(first.Id, "R-010", today);
-Console.WriteLine($" {loan}");
+Console.WriteLine($" Подій отримано: {changes}");
 Console.WriteLine();
 
-Console.WriteLine("=== 3. Список ===");
-PrintCatalog(service);
-Console.WriteLine();
-
-Console.WriteLine("=== 4. Знайти за id ===");
-Console.WriteLine($" {first.Id}: {service.Find<BookCopy>(first.Id)}");
-Console.WriteLine($" {loan.Id.ToLowerInvariant()}: {service.Find<Loan>(loan.Id.ToLowerInvariant())}");
-Console.WriteLine($" B-404: {service.Find<Book>("B-404")?.ToString() ?? "не знайдено"}");
-Console.WriteLine();
-
-Console.WriteLine("=== 5. Сценарій відмови ===");
-TryDo("видача неіснуючого примірника", () => service.IssueCopy("C-404", "R-010", today));
-TryDo("повернення неіснуючої видачі", () => service.ReturnCopy("L-404", today));
+Console.WriteLine("=== 3. Сценарій відмови: виняток є, рядка події немає ===");
 TryDo("повторна видача виданого примірника", () => service.IssueCopy(first.Id, "R-011", today));
-TryDo("дубль ISBN у каталозі", () => service.AddBook(DemoIsbn, "Чистий код (копія)", 2008));
-TryDo("дубль id у сховищі", () => store.Add(book));
-TryDo("вилучення видання з примірниками", () => service.RemoveBook(book.Id));
-Console.WriteLine($" Після відмов: {service.Find<BookCopy>(first.Id)}; видач у читача R-010: {service.CountActiveLoans("R-010")}");
+TryDo("видача неіснуючого примірника", () => service.IssueCopy("C-404", "R-010", today));
+TryDo("повернення раніше дати видачі", () => service.ReturnCopy(loan.Id, today.AddDays(-1)));
+TryDo("рік видання з майбутнього", () => service.AddBook("978-0-00-000000-2", "Книга майбутнього", 2099));
+TryDo("дубль ISBN у каталозі", () => service.AddBook(DemoIsbn, "Те саме видання", 2019));
+Console.WriteLine($" Подій отримано: {changes} (не змінилось)");
 Console.WriteLine();
 
-Console.WriteLine("=== 6. Повернення ===");
-Console.WriteLine($" {service.ReturnCopy(loan.Id, today)}");
+Console.WriteLine("=== 4. Відписка: операція виконується, повідомлення немає ===");
+service.Changed -= OnLibraryChanged;
+service.Changed -= (_, _) => changes++; // НЕ знімає підписника 2: нова лямбда — інший екземпляр делегата
+Loan returned = service.ReturnCopy(loan.Id, today); // тиха операція: підписка керована
+Console.WriteLine($" {returned}");
 Console.WriteLine($" {service.Find<BookCopy>(first.Id)}");
+Console.WriteLine($" Подій отримано: {changes} (+1 лише від лямбди-лічильника)");
 Console.WriteLine();
 
-Console.WriteLine("=== Додаткове 2: пошук з Func<T, bool> ===");
-Func<Book, bool> beforeYear2000 = b => b.Year < 2000;
-IReadOnlyList<Book> classics = service.Search(beforeYear2000);
-Console.WriteLine($" Видання до 2000 року: {classics.Count}");
-foreach (Book b in classics)
-    Console.WriteLine($"  {b}");
-Console.WriteLine($" Примірників на полиці: {service.Search<BookCopy>(c => !c.IsIssued).Count}");
-IReadOnlyList<Loan> lost = service.Search<Loan>(l => l.Status == LoanStatus.Lost);
-Console.WriteLine($" Втрачені примірники: {(lost.Count == 0 ? "немає" : string.Join(", ", lost.Select(l => $"{l.Copy.Id} ({l.Id})")))}");
+Console.WriteLine("=== 5. Func замість події, коли потрібна відповідь ===");
+IReadOnlyList<Loan> overdue = service.Search<Loan>(l => l.IsActive && l.DueOn < today);
+Console.WriteLine($" Прострочені видачі (строк {Loan.LoanPeriodDays} днів): {overdue.Count}");
+foreach (Loan l in overdue)
+    Console.WriteLine($"  {l.Id}: примірник {l.Copy.Id}, читач {l.ReaderId}, мав повернути до {l.DueOn:dd.MM.yyyy}");
+IReadOnlyList<Book> noneOnShelf = service.Search<Book>(b => service.CopiesOf(b).All(c => c.IsIssued));
+Console.WriteLine($" Видання без жодного примірника на полиці: " +
+                  $"{(noneOnShelf.Count == 0 ? "немає" : string.Join(", ", noneOnShelf.Select(b => $"{b.Id} «{b.Title}»")))}");
+Console.WriteLine();
 
-if (store is CachingBookStore cache)
-{
-    Console.WriteLine();
-    Console.WriteLine($"=== Додаткове 1: кеш — влучань {cache.Hits}, промахів {cache.Misses} ===");
-}
+Console.WriteLine($"=== 6. Що потрапило в logs/app.log за цей запуск ({logged} рядк.) ===");
+foreach (string line in File.ReadLines(logPath).TakeLast(logged))
+    Console.WriteLine($" {line}");
 
 return 0;
-
-static void PrintCatalog(LendingService service)
-{
-    IReadOnlyList<Book> books = service.All<Book>();
-    IReadOnlyList<Loan> loans = service.All<Loan>();
-    Console.WriteLine($" Видань: {books.Count}, примірників: {service.All<BookCopy>().Count}, " +
-                      $"видач: {loans.Count} (незакритих {loans.Count(l => l.IsActive)})");
-
-    foreach (Book b in books)
-    {
-        IReadOnlyList<BookCopy> copies = service.CopiesOf(b);
-        Console.WriteLine($"  {b.Id,-10} {b.Isbn,-18} {Shorten(b.Title, 26),-26} {b.Year,4}" +
-                          $"  прим.: {copies.Count}, на полиці: {copies.Count(c => !c.IsIssued)}");
-    }
-
-    foreach (Loan l in loans.Where(l => l.IsActive))
-        Console.WriteLine($"  {l}");
-}
-
-static string Shorten(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "…";
 
 static void TryDo(string title, Action action)
 {
@@ -121,7 +133,7 @@ static void TryDo(string title, Action action)
     }
     catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
     {
-        Console.WriteLine($" ✗ {title}: {ex.Message}");
+        Console.WriteLine($" ✗ {title}: {ex.Message.Split(Environment.NewLine)[0]}"); // без рядка «Actual value was …»
     }
 }
 

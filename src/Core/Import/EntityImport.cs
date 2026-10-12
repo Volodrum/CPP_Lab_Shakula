@@ -8,7 +8,8 @@ public static class EntityImport
 {
     public static ImportResult<TEntity> ToEntities<TDto, TEntity>(
         ImportResult<TDto> source,
-        Func<TDto, TEntity> fromDto)
+        Func<TDto, TEntity> fromDto,
+        Action<string>? onSkipped = null)
         where TDto : LibraryItemDto
     {
         var items = new List<TEntity>();
@@ -22,7 +23,9 @@ public static class EntityImport
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
             {
-                errors.Add($"запис {dto.Id}: {ex.Message}");
+                string reason = $"запис {dto.Id}: {ex.Message}";
+                errors.Add(reason);
+                onSkipped?.Invoke(reason);
             }
         }
 

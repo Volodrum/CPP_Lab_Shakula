@@ -11,10 +11,16 @@ public static class BookJsonImporter
         PropertyNameCaseInsensitive = true
     };
 
-    public static ImportResult<BookDto> Load(string path)
+    public static ImportResult<BookDto> Load(string path, Action<string>? onSkipped = null)
     {
         var items = new List<BookDto>();
         var errors = new List<string>();
+
+        void Skip(string reason)
+        {
+            errors.Add(reason);
+            onSkipped?.Invoke(reason);
+        }
 
         try
         {
@@ -28,7 +34,7 @@ public static class BookJsonImporter
 
                 if (book is null)
                 {
-                    errors.Add($"елемент {index}: об'єкт порожній (null)");
+                    Skip($"елемент {index}: об'єкт порожній (null)");
                     continue;
                 }
 
@@ -37,13 +43,13 @@ public static class BookJsonImporter
                 switch (book)
                 {
                     case { Id: "" or { Length: 0 } }:
-                        errors.Add($"елемент {index}: ID порожній");
+                        Skip($"елемент {index}: ID порожній");
                         break;
                     case { Isbn: "" or { Length: 0 } } or { Title: "" or { Length: 0 } }:
-                        errors.Add($"елемент {index} ({book.Id}): ISBN або назва порожні");
+                        Skip($"елемент {index} ({book.Id}): ISBN або назва порожні");
                         break;
                     case { Year: var y } when y < 1450 || y > currentYear:
-                        errors.Add($"елемент {index} ({book.Id}): рік '{book.Year}' поза допустимими межами (1450..{currentYear})");
+                        Skip($"елемент {index} ({book.Id}): рік '{book.Year}' поза допустимими межами (1450..{currentYear})");
                         break;
                     default:
                         items.Add(book);
@@ -53,11 +59,11 @@ public static class BookJsonImporter
         }
         catch (JsonException ex)
         {
-            errors.Add($"Помилка структури JSON: {ex.Message}");
+            Skip($"Помилка структури JSON: {ex.Message}");
         }
         catch (Exception ex)
         {
-            errors.Add($"Помилка читання файлу: {ex.Message}");
+            Skip($"Помилка читання файлу: {ex.Message}");
         }
 
         return new ImportResult<BookDto>(items, errors);

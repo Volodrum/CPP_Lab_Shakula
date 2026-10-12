@@ -8,10 +8,16 @@ public static class LibraryCsvImporter
 {
     private const char Separator = ';';
 
-    public static ImportResult<LibraryItemDto> Load(string path)
+    public static ImportResult<LibraryItemDto> Load(string path, Action<string>? onSkipped = null)
     {
         var items = new List<LibraryItemDto>();
         var errors = new List<string>();
+
+        void Skip(string reason)
+        {
+            errors.Add(reason);
+            onSkipped?.Invoke(reason);
+        }
 
         string[] lines = File.ReadAllLines(path, Encoding.UTF8);
 
@@ -32,7 +38,7 @@ public static class LibraryCsvImporter
                     items.Add(ok.Value);
                     break;
                 case ParseFailed failed:
-                    errors.Add($"рядок {number}: {failed.Reason}");
+                    Skip($"рядок {number}: {failed.Reason}");
                     break;
             }
         }

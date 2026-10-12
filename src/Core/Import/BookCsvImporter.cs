@@ -8,10 +8,17 @@ public static class BookCsvImporter
 {
     private const char Separator = ';';
 
-    public static ImportResult<BookDto> Load(string path)
+    // onSkipped (лаб. 6, дод. завдання 2): викликач дізнається про пропущений рядок одразу, а не лише з Errors наприкінці.
+    public static ImportResult<BookDto> Load(string path, Action<string>? onSkipped = null)
     {
         var items = new List<BookDto>();
         var errors = new List<string>();
+
+        void Skip(string reason)
+        {
+            errors.Add(reason);
+            onSkipped?.Invoke(reason);
+        }
 
         string[] lines = File.ReadAllLines(path, Encoding.UTF8);
 
@@ -32,7 +39,7 @@ public static class BookCsvImporter
                     items.Add(ok.Value);
                     break;
                 case ParseFailed failed:
-                    errors.Add($"рядок {number}: {failed.Reason}");
+                    Skip($"рядок {number}: {failed.Reason}");
                     break;
             }
         }

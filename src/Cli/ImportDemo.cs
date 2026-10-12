@@ -3,6 +3,7 @@ using Core.Import;
 
 // Лабораторна 3: імпорт CSV/JSON (запуск: dotnet run --project src/Cli -- --import [шлях]
 // або dotnet run --project src/Cli -- data/mixed.csv).
+// Лабораторна 6, дод. завдання 2: про пропущені рядки імпортер повідомляє через Action<string> під час читання.
 internal static class ImportDemo
 {
     public static int Run(string path)
@@ -16,15 +17,19 @@ internal static class ImportDemo
         string extension = Path.GetExtension(path).ToLowerInvariant();
         string fileName = Path.GetFileName(path).ToLowerInvariant();
 
+        int skipped = 0;
+        Action<string> reportSkipped = reason => Console.WriteLine($" ! пропущено #{++skipped}: {reason}");
+
         return extension switch
         {
-            ".json" => ProcessResult(BookJsonImporter.Load(path), FormatBook),
-            ".csv" when fileName.Contains("mixed") => ProcessResult(LibraryCsvImporter.Load(path), FormatLibraryItem),
-            ".csv" => ProcessResult(BookCsvImporter.Load(path), FormatBook),
+            ".json" => ProcessResult(BookJsonImporter.Load(path, reportSkipped), FormatBook),
+            ".csv" when fileName.Contains("mixed") => ProcessResult(LibraryCsvImporter.Load(path, reportSkipped), FormatLibraryItem),
+            ".csv" => ProcessResult(BookCsvImporter.Load(path, reportSkipped), FormatBook),
             _ => HandleUnsupported(extension)
         };
     }
 
+    // Пропущені рядки вже надруковано колбеком під час імпорту, тут — лише прийняті записи й підсумок.
     private static int ProcessResult<T>(ImportResult<T> result, Func<T, string> formatter)
     {
         Console.WriteLine($"Завантажено записів: {result.Items.Count}");
@@ -35,13 +40,7 @@ internal static class ImportDemo
         }
 
         if (result.Errors.Count > 0)
-        {
             Console.WriteLine($"Пропущено рядків: {result.Errors.Count}");
-            foreach (string error in result.Errors)
-            {
-                Console.WriteLine($" ! {error}");
-            }
-        }
 
         Console.WriteLine($"Статистика імпорту: {result.Summary}");
         return 0;

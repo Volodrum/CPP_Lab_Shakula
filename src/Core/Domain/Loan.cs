@@ -5,12 +5,16 @@ namespace Core.Domain;
 // Видача примірника читачу. Стан змінюється лише переходами Open → Lost → Closed.
 public sealed class Loan : ILibraryEntity
 {
+    // Строк користування примірником; дата повернення не зберігається, а обчислюється від дати видачі.
+    public const int LoanPeriodDays = 14;
+
     public string Id { get; }
     public BookCopy Copy { get; }
     public string ReaderId { get; }
     public DateOnly IssuedOn { get; }
     public DateOnly? ReturnedOn { get; private set; }
     public LoanStatus Status { get; private set; }
+    public DateOnly DueOn => IssuedOn.AddDays(LoanPeriodDays);
 
     // Втрачений примірник теж рахується за читачем, доки видачу не закрито.
     public bool IsActive => Status != LoanStatus.Closed;
