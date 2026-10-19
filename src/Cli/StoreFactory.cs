@@ -8,8 +8,9 @@ internal static class StoreFactory
 {
     public static IBookStore Create(string[] args, string dataPath)
     {
-        IBookStore store = args.Contains("--file")
-            ? new FileBookStore(dataPath)
+        // --empty (лаб. 7): порожнє сховище в пам'яті — перевірка звітів на порожньому джерелі.
+        IBookStore store = args.Contains("--file") ? new FileBookStore(dataPath)
+            : args.Contains("--empty") ? new InMemoryBookStore()
             : new InMemoryBookStore(SampleData.Items());
 
         // Декоратор накладається поверх будь-якої з двох реалізацій.

@@ -7,26 +7,34 @@
 - **Репозиторій**: <https://github.com/Volodrum/CPP_Lab_Shakula>
 - **Середовище вимірювань**: Windows 11 Home x64 (10.0.26200), .NET SDK 10.0.400, runtime .NET 10.0.11
 
-> Опис лабораторних 1–4 (з виводами консолі) — у [README_labs1-4.md](README_labs1-4.md), лабораторної 5 — у [README_lab05.md](README_lab05.md).
+> Опис лабораторних 1–4 (з виводами консолі) — у [README_labs1-4.md](README_labs1-4.md), лабораторної 5 — у [README_lab05.md](README_lab05.md), лабораторної 6 — у [README_lab06.md](README_lab06.md).
 
 ---
 
-## Лабораторна робота 6. Доменні події, делегати Action/Func, лямбди
+## Лабораторна робота 7. Звіти через LINQ: фільтри, проєкції, групування, топ-N, агрегати
 
-**Мета**: сповіщати зовнішній код про зміни стану так, щоб доменний шар не залежав від способу оброблення сповіщень: подія оголошена в `Core`, підписка лямбдою й локальною функцією — у `Cli`, `Console.WriteLine` у доменній логіці немає.
+**Мета**: реалізувати аналітичне опрацювання колекції доменних об'єктів засобами LINQ to Objects: запити різних типів у `Core`, зрозуміле представлення результатів у `Cli`, дослідження відкладеного виконання.
 
-**Варіант (бібліотека)**: `BookAdded` / `CopyIssued` / `CopyReturned` (+ `CopyRegistered`, `CopyLost`, `BookRemoved` — щоб подію піднімала кожна змінююча операція сервісу); у `EventArgs` — `CopyId`, `ReaderId`, `DueDate`; підписник друкує «видано читачу X до дати Y».
+**Варіант (бібліотека)**: топ-5 читачів за кількістю видач; прострочені видачі (`DueOn < сьогодні`); групування видань за роком (десятиліттям) видання; середня кількість примірників на видання. Додатково — дефіцит на полиці і топ-5 видань за кількістю примірників.
 
 ### Запуск
 
 | Команда | Що відбувається |
 | :------ | :-------------- |
-| `dotnet run --project src/Cli` | **Сценарій лабораторної 6** (пам'ять): підписка, події в консолі й у `logs/app.log`, відмови, відписка, `Func`-пошук |
-| `dotnet run --project src/Cli -- --file` | Той самий сценарій поверх `FileBookStore` |
-| `dotnet run --project src/Cli -- --sinks` | Дод. завдання 1: сповіщення через `INotificationSink` (`ConsoleSink` + `FileSink` → `logs/sinks.log`) |
-| `dotnet run --project src/Cli -- --service [--file] [--cache]` | Сценарій лабораторної 5 (раніше запускався без ключів) |
-| `dotnet run --project src/Cli -- --import [шлях]` | Імпорт лаб. 3; пропущені рядки тепер друкує колбек `Action<string>` (дод. завдання 2) |
-| `dotnet run --project src/Cli -- --domain` / `--info` | Лабораторні 4 і 1–2 без змін |
+| `dotnet run --project src/Cli` | = `report-top` (команда за замовчуванням) |
+| `dotnet run --project src/Cli -- report-top` | Топ-5 читачів за кількістю видач |
+| `dotnet run --project src/Cli -- report-overdue` | Прострочені видачі на сьогодні |
+| `dotnet run --project src/Cli -- report-low` | Видання, яких на полиці менше 2 примірників |
+| `dotnet run --project src/Cli -- report-groups` | Видання за десятиліттями: кількість і сума примірників |
+| `dotnet run --project src/Cli -- report-sum` | Агрегати: видань, примірників, середнє, максимум |
+| `dotnet run --project src/Cli -- report-books` | Топ-5 видань за кількістю примірників (дод. 2, `TopBy`) |
+| `dotnet run --project src/Cli -- report-join` | Прострочені видачі з назвами видань (дод. 1, `Join`) |
+| `dotnet run --project src/Cli -- report-query` | `report-groups` у синтаксисі запитів + перевірка збігу (дод. 3) |
+| `dotnet run --project src/Cli -- report-all` | Усі вісім звітів поспіль |
+| `dotnet run --project src/Cli -- report-deferred` | Демо відкладеного виконання (крок 3) |
+| `dotnet run -c Release --project src/Cli -- report-bench [N]` | Stopwatch на N (за замовч. 100 000) згенерованих видань (дод. 4) |
+| ключі `--file`, `--empty`, `--shuffle`, `--cache` | Джерело: файл / порожнє сховище / перемішаний порядок / декоратор кешу; `--file` не сприймається як назва звіту |
+| `--events`, `--service`, `--sinks`, `--import`, `--domain`, `--info` | Режими лабораторних 6, 5, 6 (дод.), 3, 4, 1–2 |
 
 ---
 
@@ -34,371 +42,269 @@
 
 ```text
 src/Core/
-├── Events/
-│   ├── LibraryChangeKind.cs        # НОВЕ: enum виду зміни
-│   └── LibraryChangedEventArgs.cs  # НОВЕ: дані події (: EventArgs)
-├── Abstractions/
-│   ├── IBookStore.cs
-│   └── INotificationSink.cs        # НОВЕ: дод. завдання 1
-├── Domain/
-│   └── Loan.cs                     # + LoanPeriodDays = 14, DueOn (обчислюється, у DTO не зберігається)
-├── Import/
-│   ├── BookCsvImporter.cs          # + Action<string>? onSkipped (дод. завдання 2)
-│   ├── BookJsonImporter.cs         # + Action<string>? onSkipped
-│   ├── LibraryCsvImporter.cs       # + Action<string>? onSkipped
-│   └── EntityImport.cs             # + Action<string>? onSkipped
-└── Services/
-    └── LendingService.cs           # ЗМІНЕНО: event Changed + OnChanged у кожній змінюючій операції
+├── Reports/
+│   ├── StockLine.cs             # НОВЕ: record-DTO рядка фонду (видання + примірники)
+│   ├── GroupSummary.cs          # НОВЕ: record-DTO групи (Key, Count, TotalCopies)
+│   ├── ReaderStat.cs            # НОВЕ: record-DTO рядка топу читачів
+│   ├── LoanLine.cs              # НОВЕ: record-DTO простроченої видачі
+│   ├── OverdueLine.cs           # НОВЕ: зведений DTO видача × видання (дод. 1)
+│   ├── ReportService.cs         # НОВЕ: усі запити
+│   ├── EnumerableExtensions.cs  # НОВЕ: TopBy<T> (дод. 2)
+│   └── ReportBenchmarks.cs      # НОВЕ: варіанти LowStock для Stopwatch (дод. 4)
+└── SampleData.cs                # ЗМІНЕНО: 19 видань, 52 примірники, 21 видача; + Generate(n) для дод. 4
 src/Cli/
-├── Program.cs                      # ЗМІНЕНО: composition root + підписка, відписка, лог
-├── ChangeLog.cs                    # НОВЕ: формат рядка журналу (спільний для події та sink'ів)
-├── NotificationSinks.cs            # НОВЕ: ConsoleSink, FileSink, CompositeSink (дод. завдання 1)
-├── SinkDemo.cs                     # НОВЕ: сценарій --sinks
-├── ServiceDemo.cs                  # НОВЕ: сценарій лаб. 5, перенесено з Program.cs без змін логіки
-├── ImportDemo.cs                   # ЗМІНЕНО: передає лямбду Action<string> в імпортер
-└── StoreFactory.cs, DomainDemo.cs
-src/Cli/bin/Debug/net10.0/logs/app.log   # створюється під час запуску (у .gitignore)
+├── Program.cs                   # ЗМІНЕНО: підкоманди report-*, вивід DTO; без Where/GroupBy
+├── DeferredDemo.cs              # НОВЕ: демо відкладеного виконання
+├── BenchDemo.cs                 # НОВЕ: Stopwatch + генерація (дод. 4)
+├── EventsDemo.cs                # НОВЕ: сценарій лаб. 6, перенесено з Program.cs без змін логіки
+└── StoreFactory.cs              # ЗМІНЕНО: + ключ --empty
 ```
 
-`Core` так само не має посилань на `System.Console` і на файлову систему для логів (розділ 9).
+### 2. Перелік запитів
 
-### 2. Які зміни стану є подіями і чому саме вони
+Усі методи `ReportService` — `public static`, приймають `IEnumerable<T>` (не сховище) і повертають `IReadOnlyList<DTO>` (крім `Totals` — іменований кортеж). Жоден не повертає `Book`/`Loan`.
 
-Подія — це факт «стан каталогу змінився», який цікавий комусь поза сервісом: журналу зараз, логеру Api та таблиці Blazor пізніше. Тому подією стає **кожна успішна змінююча операція** `LendingService` і лише вона:
+| Метод | Питання, на яке відповідає | Оператори |
+| :---- | :------------------------- | :-------- |
+| `Overdue(loans, today)` | Які видачі прострочені на дату звіту і на скільки днів? | `Where` → `OrderBy` → `ThenBy` → `Select` у `LoanLine` → `ToList` |
+| `TopReaders(loans, n)` | Хто з читачів брав книги найчастіше? | `GroupBy` (`OrdinalIgnoreCase`) → `Select` у `ReaderStat` (`Count`, `Count(pred)`) → `TopBy` (= `OrderByDescending` → `ThenBy` → `Take`) |
+| `ByDecade(books, copies)` | Як фонд розподілено за десятиліттями видання? | `GroupJoin` → `GroupBy` за значенням → `Select` (`Count`, `Sum`) → `OrderByDescending` → `ThenBy` |
+| `Totals(books, copies)` | Скільки видань і примірників, скільки в середньому і максимум на видання? | `ToList` → `Count`, `Sum`, `Average`, `Max` + перевірка порожнечі |
+| `LowStock(books, copies, threshold)` | Яких видань на полиці менше `threshold`? | `GroupJoin` → `Where` → `OrderBy` → `ThenBy` |
+| `TopBooks(books, copies, n)` | Які видання мають найбільше примірників? | `GroupJoin` → `TopBy` |
+| `OverdueWithTitles(loans, books, today)` | Прострочені видачі разом з назвою книги | `Where` → `Join` → `OrderByDescending` → `ThenBy` |
+| `ByDecadeQuery(books, copies)` | Те саме, що `ByDecade`, синтаксисом запитів | `from … group … by … into g`, `let`, `orderby … descending`, `select` |
 
-| Операція | `Kind` | Що змінилось | `ShelfDelta` | Особливі поля |
-| :------- | :----- | :----------- | :----------: | :------------ |
-| `AddBook` | `BookAdded` | нове видання в каталозі | `+0` | — |
-| `RegisterCopy` | `CopyRegistered` | новий примірник на полиці | `+1` | `CopyId` |
-| `IssueCopy` | `CopyIssued` | примірник пішов до читача | `−1` | `CopyId`, `ReaderId`, `DueDate` |
-| `ReturnCopy` | `CopyReturned` | примірник повернувся | `+1` | `CopyId`, `ReaderId`, `DueDate` (яким був строк) |
-| `ReportLost` | `CopyLost` | видачу позначено «втрачено» | `+0` (примірник і так не на полиці) | `CopyId`, `ReaderId`, `DueDate` |
-| `RemoveBook` | `BookRemoved` | видання вилучено з каталогу | `+0` | — |
+`StockQuery(books, copies)` (`internal`) — спільна відкладена проєкція «видання + його примірники» через `GroupJoin`; з неї будуються `ByDecade`, `Totals`, `LowStock`, `TopBooks`.
 
-Читання (`Find`, `Search`, `All`, `CountActiveLoans`) подій не дають: стан не змінюється. Відмова (інваріант сутності або правило сервісу кинуло виняток) теж не дає: зміни не сталося. `RemoveBook("B-404")` повертає `false` без події — вилучати не було чого.
-
-Аналог «залишку» складу в бібліотеці — кількість примірників видання **на полиці**: `ShelfDelta` (на скільки змінилась) і `OnShelfAfter` (скільки стало). Саме це оновлюватиме таблиця Blazor на тижні 12.
-
-### 3. Оголошення події та `OnChanged`
-
-Дані події (`src/Core/Events/LibraryChangedEventArgs.cs`) — незмінні властивості з первинного конструктора:
+### 3. GroupBy з проєкцією
 
 ```csharp
-public sealed class LibraryChangedEventArgs(
-    LibraryChangeKind kind, string entityId, string isbn, int shelfDelta, int onShelfAfter,
-    string? copyId = null, string? readerId = null, DateOnly? dueDate = null) : EventArgs
-{
-    public LibraryChangeKind Kind { get; } = kind;
-    public string EntityId { get; } = entityId;      // B-… / C-… / L-…
-    public int ShelfDelta { get; } = shelfDelta;
-    public int OnShelfAfter { get; } = onShelfAfter;
-    public string? ReaderId { get; } = readerId;
-    public DateOnly? DueDate { get; } = dueDate;
-    public DateTimeOffset At { get; } = DateTimeOffset.Now;
-    // + Isbn, CopyId
-}
+public static IReadOnlyList<GroupSummary> ByDecade(IEnumerable<Book> books, IEnumerable<BookCopy> copies) =>
+    StockQuery(books, copies)
+        .GroupBy(s => s.Year / 10 * 10)                                    // ключ — int-значення, не посилання
+        .Select(g => new GroupSummary($"{g.Key}-ті", g.Count(), g.Sum(s => s.Copies)))
+        .OrderByDescending(s => s.TotalCopies).ThenBy(s => s.Key, StringComparer.Ordinal)
+        .ToList();
 ```
 
-Подія й єдиний метод її підняття (`src/Core/Services/LendingService.cs`):
+`g` — `IGrouping<int, StockLine>`: `g.Key` — значення ключа (1990), `g.Count()` — кількість видань у групі, `g.Sum(s => s.Copies)` — сума примірників лише цієї групи. Після `Select` елемент уже `GroupSummary`, тож `OrderByDescending` сортує готові підсумки.
 
-```csharp
-public event EventHandler<LibraryChangedEventArgs>? Changed;
+### 4. Вивід усіх підкоманд
 
-private void OnChanged(LibraryChangeKind kind, string entityId, string isbn, int shelfDelta,
-    string? copyId = null, Loan? loan = null)
-{
-    if (Changed is null && _sink is null) return; // нікому повідомляти — не рахуємо полицю даремно
-    var change = new LibraryChangedEventArgs(kind, entityId, isbn, shelfDelta, CountOnShelf(isbn),
-        copyId ?? loan?.Copy.Id, loan?.ReaderId, loan?.DueOn);
-    Changed?.Invoke(this, change);
-    _sink?.Notify(change);
-}
+`dotnet run --project src/Cli -- report-all` (19.10.2026):
+
+```text
+Сховище: InMemoryBookStore
+Дані: видань 19, примірників 52, видач 21; дата звіту 19.10.2026
+
+=== Топ-5 читачів за кількістю видач ===
+ Читач     видач  незакр.
+ R-001         5        2
+ R-002         4        3
+ R-003         4        3
+ R-004         3        2
+ R-005         2        1
+
+=== Прострочені видачі (строк 14 днів, на 19.10.2026) ===
+ Видача Прим.  Читач      видано   строк до  простр.
+ L-001  C-001  R-001  01.09.2026 15.09.2026    34 дн.
+ L-021  C-045  R-007  03.09.2026 17.09.2026    32 дн.
+ L-002  C-012  R-002  04.09.2026 18.09.2026    31 дн.
+ L-008  C-005  R-004  15.09.2026 29.09.2026    20 дн.
+ L-004  C-029  R-003  21.09.2026 05.10.2026    14 дн.
+ L-010  C-032  R-002  25.09.2026 09.10.2026    10 дн.
+ L-012  C-020  R-003  01.10.2026 15.10.2026     4 дн.
+
+=== Видання, яких на полиці менше 2 примірників ===
+ Id     ISBN               Назва                               рік прим. на пол.
+ B-009  978-0-13-110362-7  Мова програмування C               1988     1       0
+ B-013  978-0-13-117705-5  Working Effectively with Legacy C… 2004     1       0
+ B-017  978-0-262-51087-5  Структура та інтерпретація програм 1996     1       0
+ B-007  978-0-596-00712-6  Head First Design Patterns         2004     2       1
+ B-011  978-0-7356-1967-8  Code Complete                      2004     2       1
+ B-012  978-0-201-83595-3  Міфічний людино-місяць             1995     1       1
+ B-016  978-1-4842-0077-3  Pro Git                            2014     2       1
+
+=== Видання за десятиліттями ===
+ 2010-ті  видань:   6  примірників:   22
+ 1990-ті  видань:   5  примірників:   13
+ 2000-ті  видань:   6  примірників:   12
+ 2020-ті  видань:   1  примірників:    4
+ 1980-ті  видань:   1  примірників:    1
+
+=== Підсумки фонду ===
+ видань 19, примірників 52, середнє на видання 2.74, макс 5
+
+=== Топ-5 видань за кількістю примірників (TopBy) ===
+ Id     ISBN               Назва                               рік прим. на пол.
+ B-004  978-1-61729-453-2  C# in Depth                        2019     5       3
+ B-015  978-0-7356-6745-7  CLR via C#                         2012     5       5
+ B-001  978-0-201-61622-4  Прагматичний програміст            1999     4       3
+ B-002  978-0-201-63361-0  Design Patterns                    1994     4       3
+ B-006  978-0-13-449416-6  Чиста архітектура                  2017     4       3
+
+=== Прострочені видачі з назвами видань (Join видачі × видання) ===
+ L-001  R-001  Прагматичний програміст            до 15.09.2026   34 дн.
+ L-021  R-007  Структура та інтерпретація програм до 17.09.2026   32 дн.
+ L-002  R-002  C# in Depth                        до 18.09.2026   31 дн.
+ L-008  R-004  Design Patterns                    до 29.09.2026   20 дн.
+ L-004  R-003  Рефакторинг                        до 05.10.2026   14 дн.
+ L-010  R-002  Code Complete                      до 09.10.2026   10 дн.
+ L-012  R-003  Чиста архітектура                  до 15.10.2026    4 дн.
+
+=== Видання за десятиліттями — синтаксис запитів (from … group … into …) ===
+ 2010-ті  видань:   6  примірників:   22
+ 1990-ті  видань:   5  примірників:   13
+ 2000-ті  видань:   6  примірників:   12
+ 2020-ті  видань:   1  примірників:    4
+ 1980-ті  видань:   1  примірників:    1
+ Збігається з методним ByDecade поелементно: так
 ```
 
-Виклик — останній рядок кожної змінюючої операції, **після** перевірок і запису в сховище:
+Перевірка даних: 6 + 5 + 6 + 1 + 1 = 19 видань, 22 + 13 + 12 + 4 + 1 = 52 примірники = `report-sum`; 52 / 19 = 2,7368… → `2.74` (`Average` повертає `double`; `Sum() / Count()` у `int` дав би 2). Прострочених 7: видача L-014 (строк 20.10) ще не прострочена, закриті видачі не враховано, втрачена L-002 — враховано (`IsActive`).
 
-```csharp
-Loan loan = Loan.Open(NewId("L"), copy, readerId, issuedOn); // якщо copy.Issue() кине виняток — події не буде
-_store.Add(loan);
-_store.Update(copy);
-OnChanged(LibraryChangeKind.CopyIssued, loan.Id, copy.Isbn, shelfDelta: -1, loan: loan);
-```
+**Стабільність топ-N.** У топі читачів R-005 і R-006 мають по 2 видачі, а місце одне — переможця визначає другий ключ `ThenBy(ReaderId, Ordinal)`; у топі видань так само серед чотирьох видань із 4 примірниками до п'ятірки потрапляють B-001, B-002, B-006 (а B-019 — ні). Два запуски `report-top` дають побайтово однаковий вивід, а `report-all --shuffle` (джерела перемішано `Random.Shared.Shuffle`) тричі поспіль збігся з `report-all` без перемішування (`diff` — порожній).
 
-**Чому саме тут.** `Changed?.Invoke` стоїть у класі, що оголосив подію (ззовні її викликати неможливо), і в одному приватному методі — шість операцій не дублюють створення `EventArgs`. Оскільки `OnChanged` викликається після `Loan.Open`/`Close`/`MarkLost`, `Book.Create` і `_store.Add/Update`, будь-який виняток інваріанту чи сховища перериває метод раніше, і повідомлення про зміну, якої не було, не виникає. `QuantityAfter`-аналог `OnShelfAfter` рахується вже по зміненому сховищу.
+**Порожнє джерело** — `report-all --empty`:
 
-`DueDate` — нове обчислюване поле домену: `Loan.DueOn => IssuedOn.AddDays(LoanPeriodDays)` (14 днів). У DTO і файл воно не потрапляє, тому формат `library.json` лабораторної 5 не змінився.
+```text
+Дані: видань 0, примірників 0, видач 0; дата звіту 19.10.2026
 
-### 4. Підписники зараз і на тижнях 10, 12
-
-`src/Cli/Program.cs`:
-
-```csharp
-var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "app.log");
-Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-
-void OnLibraryChanged(object? sender, LibraryChangedEventArgs e)   // підписник 1: локальна функція
-{
-    string line = ChangeLog.Format(e);
-    Console.WriteLine($" {line}");
-    try { File.AppendAllText(logPath, line + Environment.NewLine); logged++; }
-    catch (IOException ex) { Console.WriteLine($" ! журнал недоступний: {ex.Message}"); }
-}
-
-int changes = 0;
-service.Changed += OnLibraryChanged;
-service.Changed += (_, _) => changes++;                            // підписник 2: лямбда-замикання
-
-EventHandler<LibraryChangedEventArgs> orderProbe =                 // підписник 3: лямбда у змінній
-    (_, e) => Console.WriteLine($"   └ 3-й підписник: {e.Kind}; лічильник (2-й) уже = {changes}");
-service.Changed += orderProbe;
-```
-
-Формат рядка (`src/Cli/ChangeLog.cs`) — `switch` за `Kind`, для видачі саме те, що вимагає варіант:
-
-```csharp
-LibraryChangeKind.CopyIssued => $"примірник {e.CopyId} видано читачу {e.ReaderId} до {e.DueDate:dd.MM.yyyy}",
+=== Топ-5 читачів за кількістю видач ===
+ (немає рядків)
+=== Прострочені видачі (строк 14 днів, на 19.10.2026) ===
+ (немає рядків)
+=== Видання, яких на полиці менше 2 примірників ===
+ (немає рядків)
+=== Видання за десятиліттями ===
+ (немає рядків)
+=== Підсумки фонду ===
+ видань 0, примірників 0, середнє на видання 0.00, макс 0
 ...
-return $"{e.At:HH:mm:ss} {e.Kind,-14} {e.EntityId,-10} {e.ShelfDelta,3:+0;-0} → на полиці {e.OnShelfAfter}  {details}";
 ```
 
-| Тиждень | Підписник | Що робить з подією |
-| :------ | :-------- | :----------------- |
-| 6 (зараз) | `OnLibraryChanged` у Cli | рядок у консоль + `logs/app.log` |
-| 6 (зараз) | лямбда `(_, _) => changes++` | лічильник подій (замикання над `changes`) |
-| 6 (зараз) | `orderProbe` (тимчасово) | показує порядок виклику, знімається `-=` одразу після першої події |
-| 8 | тест xUnit | `service.Changed += (_, e) => raised.Add(e);` — перевірити `Kind`/`ReaderId`/`DueDate` без читання консолі |
-| 10 | обробник у Api | `ILogger<LendingService>.LogInformation(...)` замість `Console` і файлу |
-| 12 | компонент Blazor | оновити рядок таблиці/лічильник «на полиці» та викликати `StateHasChanged()`; відписатися в `Dispose` |
+Жодного винятку: `Where`/`GroupBy` на порожній послідовності дають порожній список, а `Totals` повертає `(0, 0, 0d, 0)` до виклику `Average`/`Max`.
 
-`Core` для цих змін не редагується: новий підписник — це новий `+=` у новому проєкті.
+### 5. Відкладене виконання
 
-### 5. Вивід консолі і `logs/app.log`
-
-`dotnet run --project src/Cli` (сховище в пам'яті, 12.10.2026):
+`dotnet run --project src/Cli -- report-deferred`:
 
 ```text
-Сховище: InMemoryBookStore
+=== Відкладене виконання ===
+ Запит побудовано; предикат викликано 0 разів (джерело: 21 видач)
+ Прострочених до змін:    7   (перевірок предиката: 21)
+ Прострочених після змін: 8   (перевірок: 43 — запит виконано вдруге, з новим елементом)
+ Після source.Clear(): query.Count() = 0, snapshot.Count = 8 (знімок не змінюється)
 
-Журнал: C:\Users\Admin\Downloads\CPP\Lab_1\CrossApp\src\Cli\bin\Debug\net10.0\logs\app.log
+ Where → Select   (потокові):       W1 S1 W2 S2 W3 S3
+ Where → OrderBy → Select (буфер):  W1 W2 W3 S3 S2 S1
 
-=== 1. Підписка: локальна функція (консоль + файл), лямбда-лічильник, тимчасова лямбда ===
-
-=== 2. Успішні операції: кожна дає рівно одну подію ===
- 15:33:24 BookAdded      B-2ecb0206  +0 → на полиці 0  [978-0-13-595705-9] додано до каталогу
-   └ 3-й підписник: BookAdded; лічильник (2-й) уже = 1
- 15:33:24 CopyRegistered C-06c5c71f  +1 → на полиці 1  [978-0-13-595705-9] новий примірник на полиці
- 15:33:24 CopyRegistered C-76c34d04  +1 → на полиці 2  [978-0-13-595705-9] новий примірник на полиці
- 15:33:24 CopyIssued     L-e12d1cdb  -1 → на полиці 1  примірник C-06c5c71f видано читачу R-010 до 26.10.2026
- Подій отримано: 4
-
-=== 3. Сценарій відмови: виняток є, рядка події немає ===
- ✗ повторна видача виданого примірника: Примірник C-06c5c71f вже виданий, повторна видача неможлива
- ✗ видача неіснуючого примірника: Немає примірника з id=C-404.
- ✗ повернення раніше дати видачі: Дата повернення 11.10.2026 не може бути раніше дати видачі 12.10.2026 (Parameter 'returnedOn')
- ✗ рік видання з майбутнього: Рік видання має бути в межах 1450..2026 (Parameter 'year')
- ✗ дубль ISBN у каталозі: Видання з ISBN 978-0-13-595705-9 уже є в каталозі: B-2ecb0206.
- Подій отримано: 4 (не змінилось)
-
-=== 4. Відписка: операція виконується, повідомлення немає ===
- L-e12d1cdb: примірник C-06c5c71f → читач R-010, видано 12.10.2026, закрита 12.10.2026
- C-06c5c71f [978-0-13-595705-9] — на полиці
- Подій отримано: 5 (+1 лише від лямбди-лічильника)
-
-=== 5. Func замість події, коли потрібна відповідь ===
- Прострочені видачі (строк 14 днів): 3
-  L-001: примірник C-001, читач R-001, мав повернути до 15.09.2026
-  L-002: примірник C-005, читач R-002, мав повернути до 18.09.2026
-  L-004: примірник C-013, читач R-003, мав повернути до 05.10.2026
- Видання без жодного примірника на полиці: B-009 «Мова програмування C»
-
-=== 6. Що потрапило в logs/app.log за цей запуск (4 рядк.) ===
- 15:33:24 BookAdded      B-2ecb0206  +0 → на полиці 0  [978-0-13-595705-9] додано до каталогу
- 15:33:24 CopyRegistered C-06c5c71f  +1 → на полиці 1  [978-0-13-595705-9] новий примірник на полиці
- 15:33:24 CopyRegistered C-76c34d04  +1 → на полиці 2  [978-0-13-595705-9] новий примірник на полиці
- 15:33:24 CopyIssued     L-e12d1cdb  -1 → на полиці 1  примірник C-06c5c71f видано читачу R-010 до 26.10.2026
+ ✗ зміна джерела всередині foreach: Collection was modified; enumeration operation may not execute.
+ ✓ з ToList() перед циклом вилучено 14 незакритих видач, лишилось 7
 ```
 
-Що видно з виводу:
+**Коли виконується запит у моєму коді.** Рядок `source.Where(...)` лише створює об'єкт-запит, що пам'ятає джерело і предикат, — лічильник викликів предиката після нього дорівнює 0. Предикат починає працювати тільки тоді, коли результат перебирають: `Count()` проходить усі 21 видачу і повертає 7. Потім до **того самого** списку `source` додано прострочену видачу L-999, і другий `Count()` виконав запит заново вже над 22 елементами (21 + 22 = 43 виклики) — тому 8, а не 7. `ToList()` один раз матеріалізував 8 елементів у новий список; після `source.Clear()` запит дає 0, а знімок так і лишився з 8 рядків. Усі методи `ReportService` закінчуються `ToList()`, тож у `Cli` потрапляє вже готовий знімок.
 
-- **Порядок підписки.** Для `BookAdded` спершу рядок підписника 1, далі підписник 3 бачить `changes = 1` — отже, лямбда-лічильник (2) уже відпрацювала. Обробники викликаються синхронно в порядку `+=`.
-- **`-= orderProbe` спрацював**: для наступних подій рядка `└ 3-й підписник` немає — лямбда збережена у змінній, тож `-=` отримав той самий делегат.
-- **Відмови**: п'ять винятків (`BookCopy.Issue`, сервіс, `Loan.Close`, `Book.Create`, правило унікального ISBN) — і жодного рядка події, лічильник лишився 4.
-- **Після `service.Changed -= OnLibraryChanged`** повернення відбулося (видача закрита, примірник на полиці), але рядка в консолі й у файлі немає. Лічильник став 5: рядок `service.Changed -= (_, _) => changes++;` у коді **не зняв** підписника 2 — нова лямбда є іншим екземпляром делегата.
-- **`logs/app.log`** містить 4 рядки цього запуску і не містить повернення після відписки.
+Друга частина показує потокові та буферизувальні оператори: `Where` і `Select` передають елементи по одному (W1 S1 W2 S2 …), а `OrderBy` спершу вичитує все джерело (W1 W2 W3) і лише потім віддає першого (S3). Третя — типова помилка «Collection was modified»: зміна списку під час `foreach` по відкладеному запиту над ним.
 
-Вміст `src/Cli/bin/Debug/net10.0/logs/app.log` після трьох запусків (пам'ять, `--file`, `--file`; файл дописується):
+### 6. Додаткові завдання
 
-```text
-15:33:24 BookAdded      B-2ecb0206  +0 → на полиці 0  [978-0-13-595705-9] додано до каталогу
-15:33:24 CopyRegistered C-06c5c71f  +1 → на полиці 1  [978-0-13-595705-9] новий примірник на полиці
-15:33:24 CopyRegistered C-76c34d04  +1 → на полиці 2  [978-0-13-595705-9] новий примірник на полиці
-15:33:24 CopyIssued     L-e12d1cdb  -1 → на полиці 1  примірник C-06c5c71f видано читачу R-010 до 26.10.2026
-15:33:24 BookAdded      B-4f13f003  +0 → на полиці 0  [978-0-13-595705-9] додано до каталогу
-15:33:24 CopyRegistered C-18eadf62  +1 → на полиці 1  [978-0-13-595705-9] новий примірник на полиці
-15:33:24 CopyRegistered C-2fc00cb1  +1 → на полиці 2  [978-0-13-595705-9] новий примірник на полиці
-15:33:24 CopyIssued     L-3705ac3d  -1 → на полиці 1  примірник C-18eadf62 видано читачу R-010 до 26.10.2026
-15:33:25 CopyRegistered C-5b342757  +1 → на полиці 3  [978-0-13-595705-9] новий примірник на полиці
-15:33:25 CopyRegistered C-22761585  +1 → на полиці 4  [978-0-13-595705-9] новий примірник на полиці
-15:33:25 CopyIssued     L-27dba141  -1 → на полиці 3  примірник C-5b342757 видано читачу R-010 до 26.10.2026
-```
+#### 1. `Join` і `GroupJoin` двох колекцій
 
-У другому запуску з `--file` видання вже є у `library.json`, тому `BookAdded` немає (`FindByIsbn ?? AddBook`), а на полиці стає 3–4 примірники: два повернуті з попереднього запуску + два нових. Подій — рівно стільки, скільки реальних змін.
-
-### 6. Подія чи прямий виклик логера
-
-Якби `LendingService` сам викликав `Console.WriteLine` або `File.AppendAllText` (чи навіть `logger.Log(...)`), то:
-
-1. **Кожен новий одержувач — зміна в `Core`.** Тиждень 10 (логер Api) і тиждень 12 (оновлення таблиці Blazor) вимагали б редагувати сервіс, додавати в `Core` залежності від консолі, файлової системи, `Microsoft.Extensions.Logging`, а консольний вивід «протікав» би у веб-сервер. З подією `Core` лише каже «видано примірник C-… читачу R-… до …», а реакцію кожен клієнт додає своїм `+=` — сервіс не змінюється (як і цього тижня: консоль і файл з'явились без жодного рядка вводу-виводу в `Core`).
-2. **Тестування й керування в рантаймі.** Прямий виклик не можна вимкнути чи перехопити: тест мусив би читати консоль або файл, а `Core` писав би у файл під час кожного тесту. Подію тест перевіряє підпискою (`raised.Add(e)`) і бачить типізовані `Kind`, `ReaderId`, `DueDate`, а не текст. Крім того, підпискою керує викликач: розділ 4 виводу показує, що після `-=` операція виконується мовчки — з жорстко вшитим логером так не зробити.
-
-### 7. Func замість події
+- **`Join`** — `OverdueWithTitles`: видачі (`Loan`) × видання (`Book`) за ISBN без дефісів → зведений `OverdueLine(LoanId, ReaderId, Isbn, Title, DueOn, DaysOverdue)` (вивід — `report-join` вище). `Where` стоїть до `Join`, щоб з'єднувати лише прострочені.
+- **`GroupJoin`** — `StockQuery`: видання × примірники → `StockLine`. На відміну від `Join`, `GroupJoin` лишає видання і тоді, коли примірників немає (`Copies = 0`), і віддає примірники групою, з якої рахуються `Count()` і `Count(c => !c.IsIssued)`.
 
 ```csharp
-public IReadOnlyList<T> Search<T>(Func<T, bool> predicate) where T : class, ILibraryEntity =>
-    _store.List<T>().Where(predicate).ToList();          // з лаб. 5, тут — у ролі FindAll з умови
-
-service.Search<Loan>(l => l.IsActive && l.DueOn < today);            // прострочені видачі
-service.Search<Book>(b => service.CopiesOf(b).All(c => c.IsIssued)); // нічого на полиці
+loans.Where(l => l.IsActive && l.DueOn < today)
+    .Join(books,
+        loan => IsbnRules.Compact(loan.Copy.Isbn),
+        book => IsbnRules.Compact(book.Isbn),
+        (loan, book) => new OverdueLine(loan.Id, loan.ReaderId, book.Isbn, book.Title, loan.DueOn,
+            today.DayNumber - loan.DueOn.DayNumber))
 ```
 
-Тут потрібна **відповідь** (`bool` для кожного елемента і список у результаті), тому делегат `Func<T, bool>` у сигнатурі методу. Подія для цього не підходить: вона повідомляє «щось сталося» і нічого не повертає; підписників може бути нуль або кілька, і «чию» відповідь брати — невизначено. Умову пише викликач: у тексті сервісу немає ні `DueOn < today`, ні `IsIssued`.
-
-### 8. Додаткові завдання
-
-#### 1. `INotificationSink` + `ConsoleSink` / `FileSink` через конструктор
+#### 2. Метод-розширення `TopBy<T>`
 
 ```csharp
-public interface INotificationSink { void Notify(LibraryChangedEventArgs change); }   // Core.Abstractions
-public sealed class LendingService(IBookStore store, INotificationSink? sink = null)  // ручний DI тижня 5
-```
-
-Реалізації живуть у `Cli` (`NotificationSinks.cs`), бо пишуть у консоль і файл. Сервіс приймає **одного** одержувача, тож для двох потрібен `CompositeSink`:
-
-```csharp
-// Program.cs, гілка --sinks
-new LendingService(store, new CompositeSink(new ConsoleSink(), new FileSink(sinkLogPath)))
-```
-
-```text
-> dotnet run --project src/Cli -- --sinks
-Сховище: InMemoryBookStore
-
-=== Дод. 1: сповіщення через INotificationSink (ConsoleSink + FileSink) ===
- [sink] 15:33:26 BookAdded      B-6ea7bf50  +0 → на полиці 0  [978-1-4919-5038-8] додано до каталогу
- [sink] 15:33:26 CopyRegistered C-69ba933c  +1 → на полиці 1  [978-1-4919-5038-8] новий примірник на полиці
- [sink] 15:33:26 CopyIssued     L-2cdf8030  -1 → на полиці 0  примірник C-69ba933c видано читачу R-020 до 26.10.2026
- [sink] 15:33:26 CopyReturned   L-2cdf8030  +1 → на полиці 1  примірник C-69ba933c повернув читач R-020 (строк був до 26.10.2026)
-
-=== Відмова: виняток є, сповіщення немає ===
- ✗ Видача L-2cdf8030 вже закрита 12.10.2026, змінити її стан неможливо
-
-Файл FileSink: C:\Users\Admin\Downloads\CPP\Lab_1\CrossApp\src\Cli\bin\Debug\net10.0\logs\sinks.log
-«Відписатися» від sink неможливо: одержувач заданий у конструкторі на весь час життя сервісу.
-```
-
-| | Подія `Changed` | `INotificationSink` у конструкторі |
-| :-- | :-- | :-- |
-| Скільки одержувачів | Будь-яка кількість через `+=`, без нових класів | Один; для кількох — `CompositeSink` або список у конструкторі |
-| Коли підключається | Будь-коли після створення сервісу; `-=` вимикає | Лише при створенні; змінити — створити новий сервіс |
-| Обов'язковість | Нуль підписників — нормальний стан (`?.Invoke`) | Параметр `null` за замовчуванням, інакше кожен виклик конструктора мусить його передати |
-| Видимість залежності | Прихована: з конструктора не видно, хто слухає | Явна: залежність у сигнатурі, DI-контейнер Api (тиждень 10) її підставить |
-| Тестування | `+=` лямбди в тесті | Фейкова реалізація інтерфейсу (у перевірочному скрипті — `ListSink`) |
-| Життєвий цикл | Підписник має відписатися, інакше видавець тримає його в пам'яті | Сервіс володіє посиланням; витоку через підписку немає |
-| Контракт | `EventHandler<T>`: сигнатура `(sender, e)` | Власний інтерфейс; можна додати методи (`NotifyFailure`, `Flush`) |
-
-Висновок: для «повідомити всіх, кому цікаво» з динамічною підпискою (UI Blazor, тест) зручніша подія; для обов'язкової, наперед відомої залежності, яку збирає DI-контейнер (журнал аудиту в Api), — інтерфейс. Обидва механізми отримують **той самий** екземпляр `LibraryChangedEventArgs` з одного `OnChanged`, тож поведінка «лише після успішної зміни» однакова.
-
-#### 2. `Action<string>` як параметр методу імпорту
-
-```csharp
-public static ImportResult<BookDto> Load(string path, Action<string>? onSkipped = null)
+public static IEnumerable<T> TopBy<T>(this IEnumerable<T> source, Func<T, int> key, int n, Func<T, string> thenBy)
 {
-    var items = new List<BookDto>();
-    var errors = new List<string>();
-
-    void Skip(string reason)
-    {
-        errors.Add(reason);
-        onSkipped?.Invoke(reason);
-    }
-    ...
+    ArgumentNullException.ThrowIfNull(source); /* … */ ArgumentOutOfRangeException.ThrowIfNegative(n);
+    return source.OrderByDescending(key).ThenBy(thenBy, StringComparer.Ordinal).Take(n);
+}
 ```
 
-Так само в `BookJsonImporter`, `LibraryCsvImporter` і `EntityImport.ToEntities`. `Core` нічого не друкує — про пропуск дізнається викликач і сам вирішує, що робити. `ImportDemo` передає лямбду із замиканням над лічильником:
+Використано у двох звітах: `TopReaders` (`.TopBy(r => r.Loans, n, r => r.ReaderId)`) і `TopBooks` (`.TopBy(s => s.Copies, n, s => s.BookId)`). Другий ключ — обов'язковий параметр, тож «забути ThenBy» неможливо. Метод не є ітератором (`yield`), тому перевірки аргументів виконуються одразу під час виклику, а сам ланцюжок — відкладено.
+
+#### 3. Синтаксис запитів
 
 ```csharp
-int skipped = 0;
-Action<string> reportSkipped = reason => Console.WriteLine($" ! пропущено #{++skipped}: {reason}");
+// ByDecadeQuery                                         // ByDecade (методний)
+from s in StockQuery(books, copies)                      StockQuery(books, copies)
+group s by s.Year / 10 * 10 into g                           .GroupBy(s => s.Year / 10 * 10)
+let total = g.Sum(s => s.Copies)                             .Select(g => new GroupSummary($"{g.Key}-ті",
+orderby total descending, g.Key                                  g.Count(), g.Sum(s => s.Copies)))
+select new GroupSummary($"{g.Key}-ті", g.Count(), total)      .OrderByDescending(s => s.TotalCopies)
+                                                             .ThenBy(s => s.Key, StringComparer.Ordinal)
 ```
+
+Результат однаковий поелементно (`SequenceEqual` для record порівнює за значенням → «так»). **Читабельність**: у синтаксисі запитів групування і `let` (проміжна змінна `total`, щоб не рахувати `Sum` двічі) читаються як SQL, а сортування `orderby total descending, g.Key` записано одним рядком. Але в ньому немає `Take`, `ToList`, `Count` та перевантажень зі `StringComparer` — `ToList` довелося дописати методом, а `ThenBy(..., Ordinal)` замінити сортуванням за `int`-ключем. Для `Where → OrderBy → ThenBy → Take` (топ-N, дефіцит) методний ланцюжок читається зліва направо і коротший, тому основні звіти лишилися в методному синтаксисі.
+
+#### 4. Stopwatch на 100 000 записів
+
+`dotnet run -c Release --project src/Cli -- report-bench` (100 000 видань, 250 000 примірників; запит — `LowStock` з порогом 1; медіана з 10 запусків після прогріву; «алок.» — `GC.GetTotalAllocatedBytes` на один запуск):
 
 ```text
-> dotnet run --project src/Cli -- --import
- ! пропущено #1: рядок 12: очікую щонайменше 4 колонки, отримав 3
- ! пропущено #2: рядок 13: рік 'давній' не є цілим числом або виходить за допустимі межі (1450..2026)
- ! пропущено #3: рядок 14: ISBN або назва порожні
-Завантажено записів: 10
- B-001  978-0-13-235088-4  Чистий код                     2008  Роберт Мартін
- ...
-Пропущено рядків: 3
-Статистика імпорту: Усього: 13, прийнято: 10, пропущено: 3, помилок: 23.1%
+ Згенеровано 100,000 видань і 250,000 примірників за 167 мс; кожен варіант — 10 запусків після прогріву, збірка Release
+
+ LowStock: Where → OrderBy → ToList (як у ReportService) медіана     74.2 мс  мін     48.7 мс  алок.   24.5 МБ  рядків 8,334
+ ToList після кожного кроку ланцюжка                     медіана     78.8 мс  мін     42.1 мс  алок.   29.3 МБ  рядків 8,334
+ OrderBy → Where (сортуються всі видання)                медіана     98.1 мс  мін     82.9 мс  алок.   26.7 МБ  рядків 8,334
+ відкладений запит: Count() + ToList() — 2 проходи       медіана    144.7 мс  мін    111.4 мс  алок.   48.7 МБ  рядків 8,334
+ матеріалізовано один раз: ToList(), потім .Count        медіана     70.8 мс  мін     48.6 мс  алок.   24.4 МБ  рядків 8,334
 ```
 
-Рядки про пропуски тепер з'являються **під час** читання файлу, до підсумку. `Action`, а не `Func`, бо від викликача відповіді не потрібно; а не подія, бо колбек стосується одного виклику `Load`, а не стану об'єкта (імпортери статичні — статична подія жила б увесь час програми й тримала б підписників). Параметр необов'язковий: `DomainDemo` і старий код викликають `Load(path)` як і раніше, `ImportResult.Errors` теж лишився.
+Висновки: (1) `ToList` у середині ланцюжка майже не змінює час (+6 %), але додає ~5 МБ алокацій на копії проміжних списків — користі немає, якщо проміжний результат не використовується вдруге. (2) `Where` після `OrderBy` повільніший на ~30 %: сортуються всі 100 000 рядків замість 8 334 відфільтрованих. (3) Подвійне перебирання відкладеного запиту — найдорожче: `GroupJoin` над 250 000 примірників виконується двічі (×2 час і алокації); `ToList` один раз і читання властивості `.Count` вирівнює його з основним варіантом. Більшу частину часу займає `GroupJoin` (хеш-таблиця примірників за ISBN), а не фільтр і сортування.
 
-#### 3. Чому async-обробник події — це `async void` і чим це небезпечно
+### 7. Самоперевірка
 
-Тип делегата події фіксує сигнатуру: `EventHandler<T>` повертає `void`. Тому асинхронний обробник можна записати лише як `async void`:
+1. У `Program.cs` немає жодного `Where`/`GroupBy`/`OrderBy`/`Select` над даними — лише виклики `ReportService`, `FirstOrDefault` для назви команди і вивід (`grep -E "\.(Where|GroupBy|OrderBy|Select)\(" src/Cli/Program.cs` — нічого). `Where` у `Cli` є лише в `DeferredDemo.cs` — це демонстрація самого оператора, не звіт.
+2. Два запуски `report-top` — однаковий порядок рядків; `--shuffle` × 3 — той самий результат для всіх звітів (розділ 4).
+3. `report-low --empty`, `report-sum --empty`, `report-all --empty` не падають.
+4. Кожен звіт повертає DTO (`LoanLine`, `ReaderStat`, `StockLine`, `GroupSummary`, `OverdueLine`) або кортеж чисел, а не `Book`/`Loan`.
+5. `AsParallel` у проєкті немає (`grep -rn AsParallel src --include=*.cs` — нічого; `grep Console` по `src/Core/**/*.cs` — теж нічого); вкладених циклів для фільтрів/групувань немає — `copies` до видань приєднуються `GroupJoin`, а не циклом у циклі.
 
-```csharp
-service.Changed += async (_, e) => await File.AppendAllTextAsync(logPath, ChangeLog.Format(e)); // async void
-```
+`dotnet build` — `0 Warning(s)`, `0 Error(s)`; режими `--events`, `--service`, `--sinks`, `--file`, `--import`, `--domain` працюють.
 
-`Task` повернути нікуди, отже:
+### 8. Definition of Done (Лабораторна робота 7)
 
-1. **Видавець не чекає завершення.** `Changed?.Invoke(...)` повертає керування на першому `await`; `IssueCopy` завершується, а запис у журнал ще триває. Порядок рядків у файлі між подіями не гарантований (дві операції поспіль → два паралельні записи в один файл → `IOException`), а програма може завершитись раніше, ніж запис дійде до диска.
-2. **Виняток неможливо перехопити.** Для `async void` виняток після `await` не потрапляє ні у виклик `OnChanged`, ні в `try/catch` навколо `service.ReturnCopy(...)` — його кидають у `SynchronizationContext` (у консолі — у пул потоків), що зазвичай **аварійно завершує процес**. Синхронний обробник у тій самій ситуації дав би звичайний виняток, який видно у стеку.
-3. **Тест не може дочекатися.** На тижні 8 тест підпишеться, викличе операцію і перевірить результат, а асинхронна частина обробника ще не виконана — тест нестабільний.
+- [x] 4–5 різних LINQ-сценаріїв у `Core`: `Where` (`Overdue`, `LowStock`), `Select` у DTO, `GroupBy` (`TopReaders`, `ByDecade`), агрегати (`Totals`), топ-N (`TopReaders`, `TopBooks`).
+- [x] Звіти приймають `IEnumerable<T>` і повертають `IReadOnlyList<DTO>`.
+- [x] Топ-N має другий ключ сортування (`ThenBy(..., StringComparer.Ordinal)` усередині `TopBy`).
+- [x] Порожнє джерело обробляється без винятку.
+- [x] `Cli` має 8 підкоманд звітів (+ `report-all`, `report-deferred`, `report-bench`) з вирівнюванням колонок.
+- [x] Демо відкладеного виконання працює і пояснене (розділ 5 + коментар у `ReportService.cs`).
+- [x] Лише LINQ to Objects (без PLINQ і LINQ to SQL).
+- [x] `SampleData` розширено (19 видань у 5 десятиліттях, 52 примірники, 21 видача), коміт `lab07`.
+- [x] Виконано всі 4 додаткові завдання.
 
-Правила: усередині `async void`-обробника обгортати весь код у `try/catch`; не покладатися на те, що робота завершиться до повернення з операції; якщо видавцю треба дочекатися — не подія, а `Func<LibraryChangedEventArgs, Task>` (або колекція таких делегатів, яку сервіс викликає з `await`), чи черга/`Channel<T>` з окремим споживачем. Детально — на тижні 8.
+### 9. Відповіді на питання на захисті
 
-### 9. Самоперевірка
+1. **Які оператори виконуються відкладено, а які запускають ітерацію негайно?** Відкладено — ті, що повертають `IEnumerable<T>`: `Where`, `Select`, `OrderBy`/`ThenBy`, `GroupBy`, `Join`/`GroupJoin`, `Take`, `Skip`, а також мій `TopBy`. Негайно — ті, що повертають одне значення або колекцію: `ToList`, `ToArray`, `ToDictionary`, `ToLookup`, `Count()`, `Sum`, `Average`, `Max`, `Any`, `First`/`FirstOrDefault`/`Single`, `SequenceEqual`; і, звісно, `foreach`.
+2. **Що станеться, якщо змінити джерело після побудови запиту, але до ToList?** Запит побачить нове джерело: у демо після `source.Add(L-999)` `Count()` дав 8 замість 7, а після `source.Clear()` — 0. Якщо ж змінити список *під час* перебирання — `InvalidOperationException: Collection was modified`.
+3. **Чому результат, який використовується двічі, варто матеріалізувати?** Кожне перебирання відкладеного запиту виконує всі оператори заново (у демо — 21, потім ще 22 виклики предиката; у бенчмарку `Count()` + `ToList()` — удвічі довше і вдвічі більше алокацій). Для джерела на `File.ReadLines` — це ще й повторне читання файлу, а між двома проходами дані можуть змінитися, і два числа одного звіту не збіжуться.
+4. **Які оператори змушені зібрати всю послідовність у пам'ять і чим це загрожує?** `OrderBy`/`OrderByDescending`/`ThenBy`, `GroupBy`, `GroupJoin`/`Join` (внутрішня послідовність — у хеш-таблицю), `Reverse`, `Distinct` (множину бачених), `ToList`. Загроза — пам'ять O(n) і затримка до першого елемента (потоковість втрачається: `W1 W2 W3`, потім `S3`), на нескінченній послідовності — зависання. Тому `Where` ставлю до `OrderBy`/`Join`.
+5. **Різниця між властивістю Count і методом Count().** `List<T>.Count`/`IReadOnlyCollection<T>.Count` — властивість: число вже зберігається в об'єкті, O(1). `Enumerable.Count()` — метод розширення для будь-якого `IEnumerable<T>`: для відкладеного запиту проходить усю послідовність (виконуючи запит), для колекції може взяти властивість. `Count(predicate)` завжди проходить усе.
+6. **Навіщо проєкція в DTO, якщо можна повернути сутності?** (1) Контракт звіту не залежить від моделі: `StockLine` містить `Copies`/`OnShelf`, яких у `Book` немає, а перейменування поля в `Book` не зламає Api/Blazor. (2) Сутності мають поведінку (`Issue`, `Close`) — звіт не повинен давати змінювати стан. (3) `Loan` тримає посилання на `BookCopy` — серіалізація в JSON (тиждень 10) тягнула б граф об'єктів. (4) Record порівнюються за значенням — зручно в тестах тижня 8 (`SequenceEqual` у `report-query`).
+7. **Що поверне Average для порожньої колекції і як ви це обробили?** Для `int`/`double` — кине `InvalidOperationException: Sequence contains no elements` (так само `Max`, `Min`); для `int?` поверне `null`; `Sum` і `Count` повернуть 0. У `Totals` перевіряю `stock.Count == 0` і повертаю `(0, 0, 0d, 0)` до виклику `Average`/`Max` (`report-sum --empty`).
+8. **Навіщо ThenBy у топ-N?** При рівних значеннях головного ключа порядок без `ThenBy` — це порядок джерела (`OrderBy` стабільний), а він залежить від сховища: словник, JSON-файл, у тижні 11 — БД без `ORDER BY`. Тоді на межі `Take(5)` між R-005 і R-006 (по 2 видачі) переможець «стрибає». Унікальний другий ключ (`ReaderId`, `BookId`) робить результат детермінованим — перевірено `--shuffle`.
+9. **First / FirstOrDefault / Single — різниця і коли буде виняток?** `First` — перший елемент, виняток, якщо елементів немає. `FirstOrDefault` — перший або `default` (`null` для `string`, як `args.FirstOrDefault(...) ?? "report-top"`). `Single` — рівно один елемент: виняток, якщо 0 **або** більше одного (перевіряє унікальність, тому проходить далі першого збігу); `SingleOrDefault` — `default` для 0, виняток для 2+.
+10. **Що зміниться у ваших запитах, коли джерелом стане IQueryable в EF Core?** Лямбди стануть деревами виразів (`Expression<Func<…>>`), і провайдер перекладе `Where`/`GroupBy`/`OrderBy`/`Select` у SQL. Не перекладаються довільні C#-методи: `IsbnRules.Compact`, `StringComparer.Ordinal`/`OrdinalIgnoreCase` у `GroupBy`/`ThenBy` (порівняння задає collation БД), обчислювана `DueOn` (немає колонки) — їх треба замінити на поля/вирази, які розуміє SQL, або виконати після `AsEnumerable()`. Сигнатури варто змінити на `IQueryable<T>`, а `ToList` — на `ToListAsync`. `Join` за навігаційною властивістю замінить `Include`/вкладений `Select`.
+11. **Де у вашому проєкті ручний цикл виправданіший за LINQ?** У `SampleData` (створення примірників з лічильником id і заповнення двох колекцій одночасно), у `FileBookStore.EnsureLoaded` (послідовне відновлення з побічним ефектом `Put` і винятком з контекстом), в імпортерах (рядок за рядком з номером рядка, колбеком `onSkipped` і `try/catch` на кожен рядок) і в `BenchDemo.Measure` (вимір часу кожної ітерації). Там важливі побічні ефекти, порядок і обробка помилок, а LINQ-лямбди з побічними ефектами читаються гірше.
 
-1. Пошук у `src/Core` (файли `*.cs`) за `Console` і за `logs` — **нічого**. `File.AppendAllText`, `Directory.CreateDirectory` для логів — лише в `src/Cli` (`Program.cs`, `NotificationSinks.cs`).
-2. **Кожна успішна операція дає рівно одне повідомлення** — перевірено тимчасовим консольним проєктом у scratchpad (у репозиторій не входить), що посилається на `Core`: `AddBook`, `RegisterCopy`, `IssueCopy`, `ReportLost`, `ReturnCopy` (втраченої видачі), `RemoveBook` дають по одній події відповідного `Kind`; поля `CopyId`/`ReaderId`/`DueDate = issuedOn + 14`/`ShelfDelta`/`OnShelfAfter` правильні; `INotificationSink` отримує ті самі об'єкти, що й подія. Результат: `ALL OK` (24 перевірки).
-3. **Операція, що впала, не дала повідомлення** — той самий скрипт: дубль ISBN, рік 2099, примірник для неіснуючого ISBN, видача неіснуючого примірника, повернення/втрата закритої видачі, порожній читач, вилучення видання з примірниками, шоста видача читачу (ліміт 5) → 0 подій; `RemoveBook("B-404")` → `false`, 0 подій. У консолі — розділ 3 виводу.
-4. **Після `-=` обробник мовчить** — розділ 4 виводу: повернення виконано, рядка немає ні в консолі, ні в `app.log`.
-5. **Подія оголошена як `event`**: `public event EventHandler<LibraryChangedEventArgs>? Changed;` — рядок `service.Changed(null, e)` або `service.Changed = null` у `Cli` не компілюється (CS0070).
+### 10. Що змінилося в коді попередніх лабораторних
 
-Додатково в тому ж скрипті: без підписників операції працюють (немає `NullReferenceException`); при трьох підписниках, де другий кидає виняток, перший відпрацьовує, третій — ні, виняток доходить до викликача `AddBook`, а книга при цьому **вже** додана (див. питання 4). `dotnet build` (Debug і Release) — `0 Warning(s)`, `0 Error(s)`; режими `--service`, `--file`, `--sinks`, `--import`, `--domain`, `data/mixed.csv`, `data/sample.json` працюють.
-
-### 10. Definition of Done (Лабораторна робота 6)
-
-- [x] Тип даних події в `Core`: `Core.Events.LibraryChangedEventArgs : EventArgs` + `LibraryChangeKind`.
-- [x] `event EventHandler<LibraryChangedEventArgs>? Changed` у `LendingService`; піднімається лише після успішної зміни (одним `OnChanged`).
-- [x] `Core` не пише в консоль і не пише в лог-файл.
-- [x] `Cli` підписаний локальною функцією `OnLibraryChanged`; другий підписник — лямбда-лічильник (і третій — лямбда у змінній).
-- [x] Показано `-=` і його ефект: операція після відписки без рядка в консолі та в `app.log`; відписка лямбди зі змінної; невдала відписка «новою» лямбдою.
-- [x] `Func<T, bool>` у сигнатурі `Search`; `Action<string>` у сигнатурі методів імпорту.
-- [x] `logs/app.log` формується через `Path.Combine(AppContext.BaseDirectory, "logs", "app.log")`, каталог створює `Directory.CreateDirectory`.
-- [x] README оновлено, коміт `lab06`.
-- [x] Виконано всі 3 додаткові завдання.
-
-### 11. Відповіді на питання на захисті
-
-1. **Чим `event` відрізняється від поля-делегата?** Ззовні класу для події доступні лише `+=` і `-=`. Поле-делегат можна присвоїти (`service.Changed = handler` — стерти всіх інших підписників), обнулити (`= null`) або викликати від імені сервісу (`service.Changed(this, fakeArgs)` — «повідомити» про зміну, якої не було). Обмеження гарантує, що підписники не заважають одне одному, а сповіщення надходить лише від видавця.
-2. **Коли `Action`, коли `Func`, коли подія?** `Action<T>` — передати дію, від якої відповіді не потрібно, у межах одного виклику (колбек `onSkipped` імпорту, `TryDo(title, Action)`). `Func<T, TResult>` — коли потрібен результат (умова `Search`, мапінг `Book.FromDto` в `EntityImport`). Подія — коли об'єкт повідомляє про зміну свого стану невідомій кількості зацікавлених протягом свого життя (`Changed`).
-3. **Навіщо `?.Invoke`?** Поки ніхто не підписався, `Changed == null`; прямий виклик `Changed(this, e)` кинув би `NullReferenceException`, і операція «впала» б лише тому, що її ніхто не слухає. До того ж `?.` читає поле один раз — немає гонки «перевірив на null, а інший потік відписався». Бонус: аргументи після `?.` не обчислюються, коли делегат `null`.
-4. **Що, якщо один з двох підписників кине виняток?** Обробники викликаються по черзі в одному потоці; виняток перериває список — наступні підписники цю подію не отримають, а виняток вилетить з `OnChanged` і далі з `AddBook`/`IssueCopy` до викликача. При цьому зміна вже відбулася і збережена — викликач бачить «помилку» операції, яка насправді вдалася (перевірено скриптом). Тому ризикову роботу підписник обгортає у власний `try/catch` — як `File.AppendAllText` в `OnLibraryChanged`.
-5. **Чому подію піднімають після зміни стану?** Подія — повідомлення про факт. Якщо підняти її до `copy.Issue()` і `_store.Add`, а інваріант кине виняток, журнал запише видачу, якої немає. Крім того, підписник може читати сервіс (Blazor перечитає таблицю) — він має побачити вже новий стан; так само `OnShelfAfter` рахується по зміненому сховищу.
-6. **Що таке замикання? Що захоплює лямбда-лічильник?** Лямбда, що використовує змінну із зовнішньої області видимості, захоплює саму змінну (а не її значення на момент створення): компілятор переносить її в прихований клас, спільний для лямбди й `Program`. `(_, _) => changes++` захоплює лише `changes` — тому `Console.WriteLine($"Подій отримано: {changes}")` бачить збільшене значення. `orderProbe` теж захоплює `changes`, а локальна функція `OnLibraryChanged` — `logPath` і `logged`.
-7. **Чому `-=` не працює для лямбди «в один рядок»?** Кожен вираз `(_, _) => changes++` створює новий екземпляр делегата. `-=` шукає в списку підписників делегат, рівний переданому (той самий метод і той самий об'єкт-ціль); у двох однакових за текстом лямбд згенеровані різні методи, тож збігу немає і `-=` тихо нічого не робить — це видно в розділі 4 виводу (лічильник все одно +1). Потрібно зберегти делегат у змінній (`orderProbe`) або використати іменований/локальний метод (`OnLibraryChanged`).
-8. **Навіщо `sender` і чи використовую я його?** `sender` — об'єкт, що підняв подію; один обробник, підписаний на кілька сервісів (наприклад, на два сховища чи дві філії бібліотеки), може за ним розрізнити джерело або звернутися до нього (`((LendingService)sender!).Find<Loan>(e.EntityId)`). Зараз не використовую: у Cli один сервіс, а всі потрібні дані вже в `EventArgs`, тому в лямбдах параметр відкинуто (`_`). Це конвенція `EventHandler<T>`, тому параметр є в сигнатурі.
-9. **Де може виникнути витік пам'яті через підписку?** Подія тримає посилання на делегат, а делегат — на об'єкт-ціль (або на клас замикання). Поки живий видавець, живі й усі підписники. Якщо `LendingService` живе довго (singleton в Api), а підписується короткоживучий об'єкт (компонент Blazor, сторінка) і не відписується в `Dispose`, то кожен закритий компонент лишається в пам'яті, а його обробник продовжує виконуватись. У консолі це не критично: сервіс і підписники живуть рівно до кінця процесу і звільняються разом із ним.
-10. **Чому логування не можна викликати з Core?** (1) `Core` отримав би залежність від способу виводу (консоль, файл, `ILogger`), і кожен новий клієнт (Api, Blazor) вимагав би змін у доменному шарі; консольний вивід опинився б і у веб-сервері. (2) Доменну логіку стало б важче тестувати й перевикористовувати: тест або писав би у файл, або мусив би читати консоль; вимкнути чи перенаправити повідомлення без зміни коду неможливо. Подія розв'язує обидва: `Core` повідомляє, `Cli`/Api/Blazor вирішують.
-
-### 12. Що змінилося в коді попередніх лабораторних
-
-- Сценарій лабораторної 5 перенесено з `Program.cs` у `ServiceDemo.cs` без змін логіки; тепер він запускається з ключем `--service` (без ключів запускається сценарій лабораторної 6).
-- `LendingService` отримав необов'язковий другий параметр конструктора `INotificationSink? sink = null` — наявні виклики `new LendingService(store)` не змінились.
-- `Loan`: константа `LoanPeriodDays = 14` і обчислювана властивість `DueOn`; DTO, файл `library.json` і `ToString()` не змінились.
-- Імпортери отримали необов'язковий параметр `Action<string>? onSkipped`. `ImportDemo` друкує пропущені рядки через колбек під час імпорту (раніше — окремим списком після прийнятих записів); тексти помилок ті самі, з'явилась нумерація `#N`.
+- Сценарій лабораторної 6 перенесено з `Program.cs` у `EventsDemo.cs` без змін логіки; тепер він запускається з ключем `--events`. Без ключів запускається `report-top`.
+- `SampleData.Items()`: 19 видань замість 15 (додано B-016…B-019), 52 примірники замість 20 (від 1 до 5 на видання), 21 видача замість 4 (сім читачів). Перші видання і ISBN ті самі, але id примірників зсунулися (наприклад, L-002 тепер про C-012), тож вивід розділу 5 лаб. 6 і списків лаб. 5 відрізняється від збереженого в README_lab06.md / README_lab05.md.
+- `StoreFactory`: новий ключ `--empty` (порожнє `InMemoryBookStore`).
+- Аргумент, що починається з `report`, більше не сприймається як шлях до файлу імпорту (лаб. 3: `dotnet run -- data/mixed.csv` працює як раніше).
