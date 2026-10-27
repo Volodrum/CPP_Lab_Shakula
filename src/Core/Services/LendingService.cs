@@ -24,7 +24,7 @@ public sealed class LendingService(IBookStore store, INotificationSink? sink = n
 
         Book? existing = FindByIsbn(book.Isbn);
         if (existing is not null)
-            throw new InvalidOperationException($"Видання з ISBN {book.Isbn} уже є в каталозі: {existing.Id}.");
+            throw new DomainException($"Видання з ISBN {book.Isbn} уже є в каталозі: {existing.Id}.");
 
         _store.Add(book);
         OnChanged(LibraryChangeKind.BookAdded, book.Id, book.Isbn, shelfDelta: 0); // після зміни, не до
@@ -35,7 +35,7 @@ public sealed class LendingService(IBookStore store, INotificationSink? sink = n
     public BookCopy RegisterCopy(string isbn)
     {
         Book book = FindByIsbn(isbn)
-            ?? throw new InvalidOperationException($"Немає видання з ISBN {isbn}: спершу додайте книгу в каталог.");
+            ?? throw new DomainException($"Немає видання з ISBN {isbn}: спершу додайте книгу в каталог.");
 
         BookCopy copy = BookCopy.Register(NewId("C"), book.Isbn);
         _store.Add(copy);
@@ -46,14 +46,14 @@ public sealed class LendingService(IBookStore store, INotificationSink? sink = n
     public Loan IssueCopy(string copyId, string readerId, DateOnly issuedOn)
     {
         BookCopy copy = _store.GetById<BookCopy>(copyId)
-            ?? throw new InvalidOperationException($"Немає примірника з id={copyId}.");
+            ?? throw new DomainException($"Немає примірника з id={copyId}.");
 
         if (string.IsNullOrWhiteSpace(readerId))
             throw new ArgumentException("Ідентифікатор читача обов'язковий", nameof(readerId));
 
         int active = CountActiveLoans(readerId);
         if (active >= MaxActiveLoansPerReader)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Читач {readerId.Trim()} уже має {active} незакритих видач (ліміт {MaxActiveLoansPerReader}), " +
                 $"видати примірник {copy.Id} неможливо");
 
@@ -91,7 +91,7 @@ public sealed class LendingService(IBookStore store, INotificationSink? sink = n
 
         int copies = CopiesOf(book).Count;
         if (copies > 0)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Видання {book.Id} має {copies} примірн., вилучити його з каталогу неможливо.");
 
         bool removed = _store.Remove(book.Id);
@@ -99,6 +99,65 @@ public sealed class LendingService(IBookStore store, INotificationSink? sink = n
             OnChanged(LibraryChangeKind.BookRemoved, book.Id, book.Isbn, shelfDelta: 0);
         return removed;
     }
+
+    // Тиждень 8: асинхронний імпорт каталогу. Імпортер приходить параметром (ручний DI тижня 5): сервіс не знає,
+    // файл це, HTTP чи тестова підробка. Токен іде далі в LoadAsync і перевіряється між записами.
+    // Повертає кількість доданих; повторний імпорт того самого файлу нічого не дублює (ідемпотентність).
+    public Task<int> ImportAsync(ICatalogImporter importer, string path, CancellationToken ct = default) =>
+        ImportAsync(importer, path, progress: null, ct);
+
+    // Дод. завдання 3: progress отримує відсоток опрацьованих записів (0..100), лише коли він змінився.
+    public async Task<int> ImportAsync(ICatalogImporter importer, string path, IProgress<int>? progress,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(importer);
+
+        IReadOnlyList<Book> books = await importer.LoadAsync(path, ct);
+
+        var known = KnownIsbns();
+        int added = 0, reported = -1;
+        for (int i = 0; i < books.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested(); // скасування між записами: додане лишається, решта — ні
+            if (TryAddImported(books[i], known)) added++;
+
+            int percent = (i + 1) * 100 / books.Count;
+            if (percent != reported) progress?.Report(reported = percent);
+        }
+        return added;
+    }
+
+    // Дод. завдання 1: потоковий варіант. Записи додаються, щойно прочитані, тому імпорт не атомарний:
+    // якщо запис N поганий, записи 1..N-1 уже в каталозі (на відміну від списку з LoadAsync).
+    public async Task<int> ImportAsync(IAsyncEnumerable<Book> books, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(books);
+
+        var known = KnownIsbns();
+        int added = 0;
+        await foreach (Book book in books.WithCancellation(ct)) // токен потрапить у [EnumeratorCancellation]
+        {
+            ct.ThrowIfCancellationRequested();
+            if (TryAddImported(book, known)) added++;
+        }
+        return added;
+    }
+
+    // Той самий id або ISBN уже в каталозі — пропускаємо: повторний імпорт не дублює і не порушує унікальність ISBN.
+    // Подія — для кожного фактично доданого запису, як в AddBook.
+    private bool TryAddImported(Book book, HashSet<string> knownIsbns)
+    {
+        if (_store.GetById<ILibraryEntity>(book.Id) is not null ||!knownIsbns.Add(IsbnRules.Compact(book.Isbn)))
+            return false;
+
+        _store.Add(book);
+        OnChanged(LibraryChangeKind.BookAdded, book.Id, book.Isbn, shelfDelta: 0);
+        return true;
+    }
+
+    // Один прохід по каталогу перед імпортом замість FindByIsbn на кожен запис (той — O(n), разом було б O(n²)).
+    private HashSet<string> KnownIsbns() =>
+        _store.List<Book>().Select(b => IsbnRules.Compact(b.Isbn)).ToHashSet(StringComparer.Ordinal);
 
     public int CountActiveLoans(string readerId) =>
         _store.List<Loan>().Count(l => l.IsActive && string.Equals(l.ReaderId, readerId.Trim(), StringComparison.Ordinal));
@@ -136,7 +195,7 @@ public sealed class LendingService(IBookStore store, INotificationSink? sink = n
         Search<BookCopy>(c => !c.IsIssued && IsbnRules.Compact(c.Isbn) == IsbnRules.Compact(isbn)).Count;
 
     private Loan GetLoan(string loanId) =>
-        _store.GetById<Loan>(loanId) ?? throw new InvalidOperationException($"Немає видачі з id={loanId}.");
+        _store.GetById<Loan>(loanId) ?? throw new DomainException($"Немає видачі з id={loanId}.");
 
     private static string NewId(string prefix) => $"{prefix}-{Guid.NewGuid().ToString("N")[..8]}";
 }

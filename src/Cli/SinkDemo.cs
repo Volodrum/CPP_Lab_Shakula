@@ -1,3 +1,4 @@
+using Core;
 using Core.Domain;
 using Core.Services;
 
@@ -21,7 +22,7 @@ internal static class SinkDemo
         {
             service.ReturnCopy(loan.Id, today); // видача вже закрита — Loan.Close відмовить
         }
-        catch (InvalidOperationException ex)
+        catch (DomainException ex)
         {
             Console.WriteLine($" ✗ {ex.Message}");
         }

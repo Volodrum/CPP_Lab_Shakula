@@ -1,3 +1,4 @@
+using Core;
 using Core.Domain;
 using Core.Events;
 using Core.Services;
@@ -96,7 +97,7 @@ internal static class EventsDemo
             action();
             Console.WriteLine($" {title}: відмови НЕ було!");
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is DomainException or ArgumentException)
         {
             Console.WriteLine($" ✗ {title}: {ex.Message.Split(Environment.NewLine)[0]}"); // без рядка «Actual value was …»
         }

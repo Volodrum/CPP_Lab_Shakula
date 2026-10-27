@@ -45,6 +45,9 @@ var service = new LendingService(store);
 if (args.Contains("--events")) // лаб. 6: доменні події (раніше запускалась без ключів)
     return EventsDemo.Run(service);
 
+if (args.Contains("--import-async")) // лаб. 8: асинхронний імпорт каталогу; top-level await — Main сам став async Task<int>
+    return await ImportCatalogAsync(service, AsyncImportOptions.Parse(args));
+
 // ---------- Лабораторна 7: звіти LINQ ----------
 // Program.cs лише обирає звіт і друкує DTO; жодного Where/GroupBy тут немає — усі запити в Core/Reports.
 const int TopN = 5;
@@ -135,10 +138,73 @@ void RunReport(string report)
         default:
             Console.WriteLine($" Невідома команда «{report}». Доступні:");
             Console.WriteLine($"  {string.Join(" | ", all)} | report-all | report-deferred | report-bench [кількість]");
-            Console.WriteLine("  ключі: --file | --empty | --shuffle | --cache; режими попередніх лаб: --events --service --sinks --import --domain --info");
+            Console.WriteLine("  ключі: --file | --empty | --shuffle | --cache; режими попередніх лаб: --import-async (лаб. 8) --events --service --sinks --import --domain --info");
             break;
     }
     Console.WriteLine();
+}
+
+// ---------- Лабораторна 8: асинхронний імпорт, скасування, розмежування помилок ----------
+// Токен створює Cli (тут), перевіряють LendingService.ImportAsync і JsonCatalogImporter.LoadAsync:
+// cts.Token → ImportAsync(…, ct) → LoadAsync(path, ct) → DeserializeAsync(…, ct) + ThrowIfCancellationRequested у циклах.
+static async Task<int> ImportCatalogAsync(LendingService service, AsyncImportOptions options)
+{
+    using var cts = new CancellationTokenSource();
+    ConsoleCancelEventHandler onCtrlC = (_, e) =>
+    {
+        e.Cancel = true; // не вбивати процес одразу, а попросити імпорт зупинитися
+        cts.Cancel();
+    };
+    Console.CancelKeyPress += onCtrlC;
+
+    var importer = new JsonCatalogImporter();
+    var progress = new ConsoleProgress();
+    int events = 0;
+    if (options.Big is null) // на мільйоні записів підписник рахував би полицю (CountOnShelf) мільйон разів
+        service.Changed += (_, _) => events++;
+
+    string path = options.Big is int count ? BigCatalog.TempPath(count) : options.Path;
+    try
+    {
+        if (options.Big is int n)
+        {
+            Console.WriteLine($"Генерую {n:N0} видань у {path} …");
+            await BigCatalog.WriteAsync(path, n, cts.Token);
+        }
+        Console.WriteLine($"Імпорт {path}{(options.Stream ? " (потоково, IAsyncEnumerable)" : "")}" +
+                          $"{(options.Timeout is { } t ? $", тайм-аут {t.TotalSeconds:0.##} с" : "")}; Ctrl+C — скасувати");
+
+        int added = options.Timeout is { } timeout
+            ? await TimeoutPolicy.RunAsync(Import, timeout, cts.Token) // дод. 2: зв'язані токени Ctrl+C + тайм-аут
+            : await Import(cts.Token);
+
+        Say($"Імпортовано записів: {added}");
+        if (options.Big is null)
+            Console.WriteLine($"Подій Changed: {events}; видань у каталозі: {service.All<Book>().Count}");
+        return 0;
+    }
+    // Порядок важливий: скасування — очікуваний результат, а не збій, тож перехоплюється першим і окремо.
+    catch (OperationCanceledException) { Say("Імпорт скасовано."); }
+    catch (TimeoutException ex) { Say($"Імпорт скасовано: {ex.Message}"); }
+    catch (DomainException ex) { Say($"Дані відхилено: {ex.Message}"); }
+    catch (StorageException ex) { Say($"Файл пошкоджено: {ex.Message}"); }
+    catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { Say($"Файл не знайдено: {path}"); }
+    finally
+    {
+        Console.CancelKeyPress -= onCtrlC; // після виходу cts уже звільнено — обробник не повинен до нього звертатися
+        if (options.Big is not null) File.Delete(path);
+    }
+    return 1;
+
+    Task<int> Import(CancellationToken ct) => options.Stream
+        ? service.ImportAsync(importer.StreamAsync(path), ct) // токен дійде до StreamAsync через WithCancellation
+        : service.ImportAsync(importer, path, progress, ct);
+
+    void Say(string message)
+    {
+        progress.EndLine();
+        Console.WriteLine(message);
+    }
 }
 
 static void Header(string title) => Console.WriteLine($"=== {title} ===");

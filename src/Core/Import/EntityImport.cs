@@ -21,7 +21,7 @@ public static class EntityImport
             {
                 items.Add(fromDto(dto));
             }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            catch (Exception ex) when (ex is ArgumentException or DomainException)
             {
                 string reason = $"запис {dto.Id}: {ex.Message}";
                 errors.Add(reason);

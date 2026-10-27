@@ -1,0 +1,19 @@
+[
+  { "id": "B-101", "isbn": "978-0-201-89683-1", "title": "The Art of Computer Programming, Vol. 1", "year": 1997, "author": "Дональд Кнут" },
+  { "id": "B-102", "isbn": "978-0-7356-1131-3", "title": "Code: The Hidden Language", "year": 2000, "author": "Чарльз Петцольд" },
+  { "id": "B-103", "isbn": "978-0-13-235088-4", "title": "Чистий код", "year": 2008, "author": "Роберт Мартін" },
+  { "id": "B-104", "isbn": "978-0-13-708107-3", "title": "The Clean Coder", "year": 2011, "author": "Роберт Мартін" },
+  { "id": "B-105", "isbn": "978-0-321-12742-6", "title": "Patterns of Enterprise Application Architecture", "year": 2002, "author": "Мартін Фаулер" },
+  { "id": "B-106", "isbn": "978-1-68050-239-8", "title": "Release It!", "year": 2018, "author": "Майкл Найгард" },
+  { "id": "B-107", "isbn": "978-0-321-60191-9", "title": "Continuous Delivery", "year": 2010, "author": "Джез Гамбл" },
+  { "id": "B-108", "isbn": "978-0-9882625-9-1", "title": "Проєкт «Фенікс»", "year": 2013, "author": "Джин Кім" },
+  { "id": "B-109", "isbn": "978-1-942788-33-1", "title": "Accelerate", "year": 2018, "author": "Ніколь Форсгрен" },
+  { "id": "B-110", "isbn": "978-0-13-475759-9", "title": "Рефакторинг (2-ге видання)", "year": 2018, "author": "Мартін Фаулер" },
+  { "id": "B-111", "isbn": "978-1-61729-223-1", "title": "Грокаємо алгоритми", "year": 2016, "author": "Адітья Бхаргава" },
+  { "id": "B-112", "isbn": "978-0-201-65788-3", "title": "Programming Pearls", "year": 1999, "author": "Джон Бентлі" },
+  { "id": "B-113", "isbn": "978-0-321-93411-6", "title": "Peopleware", "year": 2013, "author": "Том ДеМарко" },
+  { "id": "B-114", "isbn": "978-0-321-57351-3", "title": "Algorithms", "year": 2011, "author": "Роберт Седжвік" },
+  { "id": "B-115", "isbn": "978-1-4920-5450-4", "title": "Concurrency in C# Cookbook", "year": 2019, "author": "Стівен Клірі" },
+  { "id": "B-116", "isbn": "978-1-61729-473-0", "title": "Dependency Injection Principles, Practices, and Patterns", "year": 2019, "author": "Марк Земан" },
+  { "id": "B-117", "isbn": "978-1-61729-627-7", "title": "Unit Testing Principles, Practices, and Patterns", "year": 2020, "author": "Володимир Хориков" }
+]

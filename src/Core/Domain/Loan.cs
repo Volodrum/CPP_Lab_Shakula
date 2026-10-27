@@ -69,7 +69,7 @@ public sealed class Loan : ILibraryEntity
         };
 
         if (error is not null)
-            throw new InvalidOperationException(error);
+            throw new DomainException(error);
     }
 
     private static void ValidateArguments(string id, BookCopy copy, string readerId, DateOnly issuedOn)

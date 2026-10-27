@@ -1,3 +1,4 @@
+using Core;
 using Core.Abstractions;
 using Core.Domain;
 using Core.Services;
@@ -97,7 +98,7 @@ internal static class ServiceDemo
             action();
             Console.WriteLine($" {title}: відмови НЕ було!");
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is DomainException or ArgumentException or InvalidOperationException) // IOE — дубль id від самого сховища
         {
             Console.WriteLine($" ✗ {title}: {ex.Message}");
         }

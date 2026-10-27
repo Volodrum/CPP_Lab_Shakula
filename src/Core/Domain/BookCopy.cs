@@ -32,7 +32,7 @@ public sealed class BookCopy : ILibraryEntity
     public void Issue()
     {
         if (IsIssued)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Примірник {Id} вже виданий, повторна видача неможлива");
 
         IsIssued = true;
@@ -41,7 +41,7 @@ public sealed class BookCopy : ILibraryEntity
     public void Return()
     {
         if (!IsIssued)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Примірник {Id} і так на полиці, повернути його неможливо");
 
         IsIssued = false;

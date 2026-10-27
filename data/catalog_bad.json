@@ -1,0 +1,7 @@
+[
+  { "id": "B-101", "isbn": "978-0-201-89683-1", "title": "The Art of Computer Programming, Vol. 1", "year": 1997, "author": "Дональд Кнут" },
+  { "id": "B-102", "isbn": "978-0-7356-1131-3", "title": "Code: The Hidden Language", "year": 2000, "author": "Чарльз Петцольд" },
+  { "id": "B-103", "isbn": "978-0-13-235088-4", "title": "Чистий код", "year": 2099, "author": "Роберт Мартін" },
+  { "id": "B-104", "isbn": "978-0-13-708107-3", "title": "The Clean Coder", "year": 2011, "author": "Роберт Мартін" },
+  { "id": "B-105", "isbn": "978-0-321-12742-6", "title": "Patterns of Enterprise Application Architecture", "year": 2002, "author": "Мартін Фаулер" }
+]

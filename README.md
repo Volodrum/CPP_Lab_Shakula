@@ -7,34 +7,31 @@
 - **Репозиторій**: <https://github.com/Volodrum/CPP_Lab_Shakula>
 - **Середовище вимірювань**: Windows 11 Home x64 (10.0.26200), .NET SDK 10.0.400, runtime .NET 10.0.11
 
-> Опис лабораторних 1–4 (з виводами консолі) — у [README_labs1-4.md](README_labs1-4.md), лабораторної 5 — у [README_lab05.md](README_lab05.md), лабораторної 6 — у [README_lab06.md](README_lab06.md).
+> Опис лабораторних 1–4 (з виводами консолі) — у [README_labs1-4.md](README_labs1-4.md), лабораторної 5 — у [README_lab05.md](README_lab05.md), лабораторної 6 — у [README_lab06.md](README_lab06.md), лабораторної 7 — у [README_lab07.md](README_lab07.md).
 
 ---
 
-## Лабораторна робота 7. Звіти через LINQ: фільтри, проєкції, групування, топ-N, агрегати
+## Лабораторна робота 8. async/await, скасування, доменні винятки, unit-тести Core
 
-**Мета**: реалізувати аналітичне опрацювання колекції доменних об'єктів засобами LINQ to Objects: запити різних типів у `Core`, зрозуміле представлення результатів у `Cli`, дослідження відкладеного виконання.
+**Мета**: реалізувати асинхронне виконання тривалих операцій введення-виведення, підтримати кооперативне скасування, розмежувати доменні й технічні помилки та покрити тестами ключову логіку `Core`.
 
-**Варіант (бібліотека)**: топ-5 читачів за кількістю видач; прострочені видачі (`DueOn < сьогодні`); групування видань за роком (десятиліттям) видання; середня кількість примірників на видання. Додатково — дефіцит на полиці і топ-5 видань за кількістю примірників.
+**Варіант (бібліотека)**: async-імпорт каталогу видань з JSON; `DomainException` «примірник уже видано»; тест на повернення невиданого примірника.
 
 ### Запуск
 
 | Команда | Що відбувається |
 | :------ | :-------------- |
-| `dotnet run --project src/Cli` | = `report-top` (команда за замовчуванням) |
-| `dotnet run --project src/Cli -- report-top` | Топ-5 читачів за кількістю видач |
-| `dotnet run --project src/Cli -- report-overdue` | Прострочені видачі на сьогодні |
-| `dotnet run --project src/Cli -- report-low` | Видання, яких на полиці менше 2 примірників |
-| `dotnet run --project src/Cli -- report-groups` | Видання за десятиліттями: кількість і сума примірників |
-| `dotnet run --project src/Cli -- report-sum` | Агрегати: видань, примірників, середнє, максимум |
-| `dotnet run --project src/Cli -- report-books` | Топ-5 видань за кількістю примірників (дод. 2, `TopBy`) |
-| `dotnet run --project src/Cli -- report-join` | Прострочені видачі з назвами видань (дод. 1, `Join`) |
-| `dotnet run --project src/Cli -- report-query` | `report-groups` у синтаксисі запитів + перевірка збігу (дод. 3) |
-| `dotnet run --project src/Cli -- report-all` | Усі вісім звітів поспіль |
-| `dotnet run --project src/Cli -- report-deferred` | Демо відкладеного виконання (крок 3) |
-| `dotnet run -c Release --project src/Cli -- report-bench [N]` | Stopwatch на N (за замовч. 100 000) згенерованих видань (дод. 4) |
-| ключі `--file`, `--empty`, `--shuffle`, `--cache` | Джерело: файл / порожнє сховище / перемішаний порядок / декоратор кешу; `--file` не сприймається як назва звіту |
-| `--events`, `--service`, `--sinks`, `--import`, `--domain`, `--info` | Режими лабораторних 6, 5, 6 (дод.), 3, 4, 1–2 |
+| `dotnet test` | Усі тести `tests/Core.Tests` (28 випадків) |
+| `dotnet test --collect:"XPlat Code Coverage"` | Те саме + звіт покриття Cobertura у `tests/Core.Tests/TestResults/…` (дод. 4) |
+| `dotnet run --project src/Cli -- --import-async` | Імпорт `data/catalog.json` (17 видань) у сховище в пам'яті |
+| `dotnet run --project src/Cli -- --import-async --file` | Те саме у `FileBookStore`; другий запуск — 0 записів (ідемпотентність) |
+| `dotnet run --project src/Cli -- --import-async data/catalog_bad.json` | Зіпсований запис 3 → «Дані відхилено: Запис 3: …» |
+| `dotnet run --project src/Cli -- --import-async --big` | Генерує 1 000 000 видань у `%TEMP%`, імпортує з прогресом; **Ctrl+C** → «Імпорт скасовано.» |
+| `dotnet run --project src/Cli -- --import-async --big --timeout 2` | Той самий файл із тайм-аутом 2 с (зв'язані токени, дод. 2) |
+| `… --import-async [шлях] --stream` | Потоковий імпорт через `IAsyncEnumerable<Book>` (дод. 1) |
+| `… --import-async --big 200000` | Розмір згенерованого файлу задається числом після `--big` |
+
+Як перевірити скасування: запустити `--import-async --big` і натиснути Ctrl+C, поки малюється прогрес (або коли з'явився рядок «Імпорт …»), — програма друкує «Імпорт скасовано.» і завершується з кодом 1 без стектрейсу. Без натискання: `--big --timeout 2` (файл генерується до старту тайм-ауту; на цій машині розбір і додавання мільйона записів тривають довше за 2 с). У тестах скасування перевіряють `ImportAsync_WhenAlreadyCancelled_Throws`, `ImportAsync_WhenCancelledDuringLoop_StopsAfterCurrentRecord` і два тести `TimeoutPolicy_*`.
 
 ---
 
@@ -42,269 +39,212 @@
 
 ```text
 src/Core/
-├── Reports/
-│   ├── StockLine.cs             # НОВЕ: record-DTO рядка фонду (видання + примірники)
-│   ├── GroupSummary.cs          # НОВЕ: record-DTO групи (Key, Count, TotalCopies)
-│   ├── ReaderStat.cs            # НОВЕ: record-DTO рядка топу читачів
-│   ├── LoanLine.cs              # НОВЕ: record-DTO простроченої видачі
-│   ├── OverdueLine.cs           # НОВЕ: зведений DTO видача × видання (дод. 1)
-│   ├── ReportService.cs         # НОВЕ: усі запити
-│   ├── EnumerableExtensions.cs  # НОВЕ: TopBy<T> (дод. 2)
-│   └── ReportBenchmarks.cs      # НОВЕ: варіанти LowStock для Stopwatch (дод. 4)
-└── SampleData.cs                # ЗМІНЕНО: 19 видань, 52 примірники, 21 видача; + Generate(n) для дод. 4
+├── DomainException.cs              # НОВЕ: порушення правила бібліотеки
+├── StorageException.cs             # НОВЕ: технічна помилка джерела (обгортає JsonException)
+├── Abstractions/ICatalogImporter.cs  # НОВЕ: асинхронний контракт LoadAsync(path, ct)
+├── Storage/JsonCatalogImporter.cs  # НОВЕ: FileStream(useAsync) + DeserializeAsync; StreamAsync (дод. 1)
+├── Services/LendingService.cs      # ЗМІНЕНО: ImportAsync(importer, path, [progress], ct), ImportAsync(IAsyncEnumerable)
+├── Services/TimeoutPolicy.cs       # НОВЕ: зв'язані токени користувач + тайм-аут (дод. 2)
+├── Domain/BookCopy.cs, Loan.cs     # ЗМІНЕНО: InvalidOperationException → DomainException
+└── Import/EntityImport.cs          # ЗМІНЕНО: перехоплює DomainException замість InvalidOperationException
 src/Cli/
-├── Program.cs                   # ЗМІНЕНО: підкоманди report-*, вивід DTO; без Where/GroupBy
-├── DeferredDemo.cs              # НОВЕ: демо відкладеного виконання
-├── BenchDemo.cs                 # НОВЕ: Stopwatch + генерація (дод. 4)
-├── EventsDemo.cs                # НОВЕ: сценарій лаб. 6, перенесено з Program.cs без змін логіки
-└── StoreFactory.cs              # ЗМІНЕНО: + ключ --empty
+├── Program.cs                      # ЗМІНЕНО: --import-async: top-level await, Ctrl+C, catch за типами
+├── AsyncImport.cs                  # НОВЕ: розбір ключів, ConsoleProgress (дод. 3), генератор великого файлу
+└── EventsDemo.cs, ServiceDemo.cs, SinkDemo.cs  # ЗМІНЕНО: catch DomainException
+tests/Core.Tests/                   # НОВЕ: xUnit, посилається лише на src/Core
+├── LendingServiceTests.cs          # інваріанти, DomainException vs ArgumentException, подія
+├── ReportServiceTests.cs           # звіти тижня 7: [Theory], топ-N, агрегати
+├── ImportTests.cs                  # скасування, ідемпотентність, тимчасові файли, тайм-аут
+├── TestData.cs                     # фіксований фонд із 4 видань / 9 примірників (не SampleData)
+└── TestDoubles.cs                  # FakeImporter, NeverEndingImporter, CallbackProgress
+data/catalog.json, catalog_bad.json # НОВЕ: 17 видань; 5 видань із роком 2099 у записі 3
 ```
 
-### 2. Перелік запитів
+Проєкт тестів створено командами з кроку 1 (`dotnet new xunit -n Core.Tests -o tests/Core.Tests -f net10.0`, `dotnet sln add …`, `dotnet add tests/Core.Tests reference src/Core/Core.csproj`); `Core.Tests.csproj` має єдиний `ProjectReference` — на `Core`.
 
-Усі методи `ReportService` — `public static`, приймають `IEnumerable<T>` (не сховище) і повертають `IReadOnlyList<DTO>` (крім `Totals` — іменований кортеж). Жоден не повертає `Book`/`Loan`.
+### 2. Які операції стали асинхронними і чому
 
-| Метод | Питання, на яке відповідає | Оператори |
-| :---- | :------------------------- | :-------- |
-| `Overdue(loans, today)` | Які видачі прострочені на дату звіту і на скільки днів? | `Where` → `OrderBy` → `ThenBy` → `Select` у `LoanLine` → `ToList` |
-| `TopReaders(loans, n)` | Хто з читачів брав книги найчастіше? | `GroupBy` (`OrdinalIgnoreCase`) → `Select` у `ReaderStat` (`Count`, `Count(pred)`) → `TopBy` (= `OrderByDescending` → `ThenBy` → `Take`) |
-| `ByDecade(books, copies)` | Як фонд розподілено за десятиліттями видання? | `GroupJoin` → `GroupBy` за значенням → `Select` (`Count`, `Sum`) → `OrderByDescending` → `ThenBy` |
-| `Totals(books, copies)` | Скільки видань і примірників, скільки в середньому і максимум на видання? | `ToList` → `Count`, `Sum`, `Average`, `Max` + перевірка порожнечі |
-| `LowStock(books, copies, threshold)` | Яких видань на полиці менше `threshold`? | `GroupJoin` → `Where` → `OrderBy` → `ThenBy` |
-| `TopBooks(books, copies, n)` | Які видання мають найбільше примірників? | `GroupJoin` → `TopBy` |
-| `OverdueWithTitles(loans, books, today)` | Прострочені видачі разом з назвою книги | `Where` → `Join` → `OrderByDescending` → `ThenBy` |
-| `ByDecadeQuery(books, copies)` | Те саме, що `ByDecade`, синтаксисом запитів | `from … group … by … into g`, `let`, `orderby … descending`, `select` |
+**Асинхронні** — лише ті, де потік справді чекав би на ввід-вивід:
 
-`StockQuery(books, copies)` (`internal`) — спільна відкладена проєкція «видання + його примірники» через `GroupJoin`; з неї будуються `ByDecade`, `Totals`, `LowStock`, `TopBooks`.
+- `JsonCatalogImporter.LoadAsync` / `StreamAsync` — читання файлу каталогу. Файл може бути великим (мільйон записів — ~100 МБ), а згодом на місці файлу буде HTTP (тиждень 13). `FileStream(..., useAsync: true)` + `JsonSerializer.DeserializeAsync` дають справжній overlapped I/O: поки диск віддає байти, потік не зайнятий.
+- `LendingService.ImportAsync` — асинхронний, бо чекає `LoadAsync` («асинхронність на всіх рівнях»). Сам цикл додавання синхронний (робота з пам'яттю), але між записами перевіряє токен.
+- `Program.cs` — top-level `await`, тож `Main` став `async Task<int>`; `.Result`/`.Wait()` немає.
+- `BigCatalog.WriteAsync` (Cli) — запис згенерованого файлу через `SerializeAsync`.
 
-### 3. GroupBy з проєкцією
+**Лишились синхронними**: доменні операції (`AddBook`, `IssueCopy`, `ReturnCopy` …) і `IBookStore` — вони працюють зі словником у пам'яті, чекати нічого; обгортка `Task` дала б лише накладні витрати. `ReportService` — чисті обчислення над колекціями. `FileBookStore` поки пише синхронно (`File.WriteAllText` після кожної зміни): контракт `IBookStore` асинхронним стане разом з EF Core на тижні 11 (`SaveChangesAsync`), щоб не міняти його двічі. Старі імпортери тижнів 2–4 (`BookCsvImporter`, `BookJsonImporter`) не чіпав — на них тримаються режими `--import`/`--domain`.
+
+### 3. Фрагменти коду
+
+`LoadAsync` ([JsonCatalogImporter.cs](src/Core/Storage/JsonCatalogImporter.cs)):
 
 ```csharp
-public static IReadOnlyList<GroupSummary> ByDecade(IEnumerable<Book> books, IEnumerable<BookCopy> copies) =>
-    StockQuery(books, copies)
-        .GroupBy(s => s.Year / 10 * 10)                                    // ключ — int-значення, не посилання
-        .Select(g => new GroupSummary($"{g.Key}-ті", g.Count(), g.Sum(s => s.Copies)))
-        .OrderByDescending(s => s.TotalCopies).ThenBy(s => s.Key, StringComparer.Ordinal)
-        .ToList();
-```
-
-`g` — `IGrouping<int, StockLine>`: `g.Key` — значення ключа (1990), `g.Count()` — кількість видань у групі, `g.Sum(s => s.Copies)` — сума примірників лише цієї групи. Після `Select` елемент уже `GroupSummary`, тож `OrderByDescending` сортує готові підсумки.
-
-### 4. Вивід усіх підкоманд
-
-`dotnet run --project src/Cli -- report-all` (19.10.2026):
-
-```text
-Сховище: InMemoryBookStore
-Дані: видань 19, примірників 52, видач 21; дата звіту 19.10.2026
-
-=== Топ-5 читачів за кількістю видач ===
- Читач     видач  незакр.
- R-001         5        2
- R-002         4        3
- R-003         4        3
- R-004         3        2
- R-005         2        1
-
-=== Прострочені видачі (строк 14 днів, на 19.10.2026) ===
- Видача Прим.  Читач      видано   строк до  простр.
- L-001  C-001  R-001  01.09.2026 15.09.2026    34 дн.
- L-021  C-045  R-007  03.09.2026 17.09.2026    32 дн.
- L-002  C-012  R-002  04.09.2026 18.09.2026    31 дн.
- L-008  C-005  R-004  15.09.2026 29.09.2026    20 дн.
- L-004  C-029  R-003  21.09.2026 05.10.2026    14 дн.
- L-010  C-032  R-002  25.09.2026 09.10.2026    10 дн.
- L-012  C-020  R-003  01.10.2026 15.10.2026     4 дн.
-
-=== Видання, яких на полиці менше 2 примірників ===
- Id     ISBN               Назва                               рік прим. на пол.
- B-009  978-0-13-110362-7  Мова програмування C               1988     1       0
- B-013  978-0-13-117705-5  Working Effectively with Legacy C… 2004     1       0
- B-017  978-0-262-51087-5  Структура та інтерпретація програм 1996     1       0
- B-007  978-0-596-00712-6  Head First Design Patterns         2004     2       1
- B-011  978-0-7356-1967-8  Code Complete                      2004     2       1
- B-012  978-0-201-83595-3  Міфічний людино-місяць             1995     1       1
- B-016  978-1-4842-0077-3  Pro Git                            2014     2       1
-
-=== Видання за десятиліттями ===
- 2010-ті  видань:   6  примірників:   22
- 1990-ті  видань:   5  примірників:   13
- 2000-ті  видань:   6  примірників:   12
- 2020-ті  видань:   1  примірників:    4
- 1980-ті  видань:   1  примірників:    1
-
-=== Підсумки фонду ===
- видань 19, примірників 52, середнє на видання 2.74, макс 5
-
-=== Топ-5 видань за кількістю примірників (TopBy) ===
- Id     ISBN               Назва                               рік прим. на пол.
- B-004  978-1-61729-453-2  C# in Depth                        2019     5       3
- B-015  978-0-7356-6745-7  CLR via C#                         2012     5       5
- B-001  978-0-201-61622-4  Прагматичний програміст            1999     4       3
- B-002  978-0-201-63361-0  Design Patterns                    1994     4       3
- B-006  978-0-13-449416-6  Чиста архітектура                  2017     4       3
-
-=== Прострочені видачі з назвами видань (Join видачі × видання) ===
- L-001  R-001  Прагматичний програміст            до 15.09.2026   34 дн.
- L-021  R-007  Структура та інтерпретація програм до 17.09.2026   32 дн.
- L-002  R-002  C# in Depth                        до 18.09.2026   31 дн.
- L-008  R-004  Design Patterns                    до 29.09.2026   20 дн.
- L-004  R-003  Рефакторинг                        до 05.10.2026   14 дн.
- L-010  R-002  Code Complete                      до 09.10.2026   10 дн.
- L-012  R-003  Чиста архітектура                  до 15.10.2026    4 дн.
-
-=== Видання за десятиліттями — синтаксис запитів (from … group … into …) ===
- 2010-ті  видань:   6  примірників:   22
- 1990-ті  видань:   5  примірників:   13
- 2000-ті  видань:   6  примірників:   12
- 2020-ті  видань:   1  примірників:    4
- 1980-ті  видань:   1  примірників:    1
- Збігається з методним ByDecade поелементно: так
-```
-
-Перевірка даних: 6 + 5 + 6 + 1 + 1 = 19 видань, 22 + 13 + 12 + 4 + 1 = 52 примірники = `report-sum`; 52 / 19 = 2,7368… → `2.74` (`Average` повертає `double`; `Sum() / Count()` у `int` дав би 2). Прострочених 7: видача L-014 (строк 20.10) ще не прострочена, закриті видачі не враховано, втрачена L-002 — враховано (`IsActive`).
-
-**Стабільність топ-N.** У топі читачів R-005 і R-006 мають по 2 видачі, а місце одне — переможця визначає другий ключ `ThenBy(ReaderId, Ordinal)`; у топі видань так само серед чотирьох видань із 4 примірниками до п'ятірки потрапляють B-001, B-002, B-006 (а B-019 — ні). Два запуски `report-top` дають побайтово однаковий вивід, а `report-all --shuffle` (джерела перемішано `Random.Shared.Shuffle`) тричі поспіль збігся з `report-all` без перемішування (`diff` — порожній).
-
-**Порожнє джерело** — `report-all --empty`:
-
-```text
-Дані: видань 0, примірників 0, видач 0; дата звіту 19.10.2026
-
-=== Топ-5 читачів за кількістю видач ===
- (немає рядків)
-=== Прострочені видачі (строк 14 днів, на 19.10.2026) ===
- (немає рядків)
-=== Видання, яких на полиці менше 2 примірників ===
- (немає рядків)
-=== Видання за десятиліттями ===
- (немає рядків)
-=== Підсумки фонду ===
- видань 0, примірників 0, середнє на видання 0.00, макс 0
-...
-```
-
-Жодного винятку: `Where`/`GroupBy` на порожній послідовності дають порожній список, а `Totals` повертає `(0, 0, 0d, 0)` до виклику `Average`/`Max`.
-
-### 5. Відкладене виконання
-
-`dotnet run --project src/Cli -- report-deferred`:
-
-```text
-=== Відкладене виконання ===
- Запит побудовано; предикат викликано 0 разів (джерело: 21 видач)
- Прострочених до змін:    7   (перевірок предиката: 21)
- Прострочених після змін: 8   (перевірок: 43 — запит виконано вдруге, з новим елементом)
- Після source.Clear(): query.Count() = 0, snapshot.Count = 8 (знімок не змінюється)
-
- Where → Select   (потокові):       W1 S1 W2 S2 W3 S3
- Where → OrderBy → Select (буфер):  W1 W2 W3 S3 S2 S1
-
- ✗ зміна джерела всередині foreach: Collection was modified; enumeration operation may not execute.
- ✓ з ToList() перед циклом вилучено 14 незакритих видач, лишилось 7
-```
-
-**Коли виконується запит у моєму коді.** Рядок `source.Where(...)` лише створює об'єкт-запит, що пам'ятає джерело і предикат, — лічильник викликів предиката після нього дорівнює 0. Предикат починає працювати тільки тоді, коли результат перебирають: `Count()` проходить усі 21 видачу і повертає 7. Потім до **того самого** списку `source` додано прострочену видачу L-999, і другий `Count()` виконав запит заново вже над 22 елементами (21 + 22 = 43 виклики) — тому 8, а не 7. `ToList()` один раз матеріалізував 8 елементів у новий список; після `source.Clear()` запит дає 0, а знімок так і лишився з 8 рядків. Усі методи `ReportService` закінчуються `ToList()`, тож у `Cli` потрапляє вже готовий знімок.
-
-Друга частина показує потокові та буферизувальні оператори: `Where` і `Select` передають елементи по одному (W1 S1 W2 S2 …), а `OrderBy` спершу вичитує все джерело (W1 W2 W3) і лише потім віддає першого (S3). Третя — типова помилка «Collection was modified»: зміна списку під час `foreach` по відкладеному запиту над ним.
-
-### 6. Додаткові завдання
-
-#### 1. `Join` і `GroupJoin` двох колекцій
-
-- **`Join`** — `OverdueWithTitles`: видачі (`Loan`) × видання (`Book`) за ISBN без дефісів → зведений `OverdueLine(LoanId, ReaderId, Isbn, Title, DueOn, DaysOverdue)` (вивід — `report-join` вище). `Where` стоїть до `Join`, щоб з'єднувати лише прострочені.
-- **`GroupJoin`** — `StockQuery`: видання × примірники → `StockLine`. На відміну від `Join`, `GroupJoin` лишає видання і тоді, коли примірників немає (`Copies = 0`), і віддає примірники групою, з якої рахуються `Count()` і `Count(c => !c.IsIssued)`.
-
-```csharp
-loans.Where(l => l.IsActive && l.DueOn < today)
-    .Join(books,
-        loan => IsbnRules.Compact(loan.Copy.Isbn),
-        book => IsbnRules.Compact(book.Isbn),
-        (loan, book) => new OverdueLine(loan.Id, loan.ReaderId, book.Isbn, book.Title, loan.DueOn,
-            today.DayNumber - loan.DueOn.DayNumber))
-```
-
-#### 2. Метод-розширення `TopBy<T>`
-
-```csharp
-public static IEnumerable<T> TopBy<T>(this IEnumerable<T> source, Func<T, int> key, int n, Func<T, string> thenBy)
+ct.ThrowIfCancellationRequested(); // уже скасовано — файл навіть не відкриваємо
+await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
+dtos = await JsonSerializer.DeserializeAsync<List<BookDto>>(stream, Options, ct)
+    ?? throw new DomainException($"Файл {Path.GetFileName(path)} не містить списку.");
+for (var i = 0; i < dtos.Count; i++)
 {
-    ArgumentNullException.ThrowIfNull(source); /* … */ ArgumentOutOfRangeException.ThrowIfNegative(n);
-    return source.OrderByDescending(key).ThenBy(thenBy, StringComparer.Ordinal).Take(n);
+    ct.ThrowIfCancellationRequested();
+    result.Add(ToBook(dtos[i], i + 1)); // ArgumentException → DomainException($"Запис {i + 1}: …", ex)
 }
 ```
 
-Використано у двох звітах: `TopReaders` (`.TopBy(r => r.Loans, n, r => r.ReaderId)`) і `TopBooks` (`.TopBy(s => s.Copies, n, s => s.BookId)`). Другий ключ — обов'язковий параметр, тож «забути ThenBy» неможливо. Метод не є ітератором (`yield`), тому перевірки аргументів виконуються одразу під час виклику, а сам ланцюжок — відкладено.
-
-#### 3. Синтаксис запитів
+Обробка скасування ([Program.cs](src/Cli/Program.cs), `ImportCatalogAsync`):
 
 ```csharp
-// ByDecadeQuery                                         // ByDecade (методний)
-from s in StockQuery(books, copies)                      StockQuery(books, copies)
-group s by s.Year / 10 * 10 into g                           .GroupBy(s => s.Year / 10 * 10)
-let total = g.Sum(s => s.Copies)                             .Select(g => new GroupSummary($"{g.Key}-ті",
-orderby total descending, g.Key                                  g.Count(), g.Sum(s => s.Copies)))
-select new GroupSummary($"{g.Key}-ті", g.Count(), total)      .OrderByDescending(s => s.TotalCopies)
-                                                             .ThenBy(s => s.Key, StringComparer.Ordinal)
+using var cts = new CancellationTokenSource();
+Console.CancelKeyPress += onCtrlC;                 // (_, e) => { e.Cancel = true; cts.Cancel(); }
+try { int added = await Import(cts.Token); Say($"Імпортовано записів: {added}"); }
+catch (OperationCanceledException) { Say("Імпорт скасовано."); }        // першим: це не збій
+catch (TimeoutException ex) { Say($"Імпорт скасовано: {ex.Message}"); }
+catch (DomainException ex) { Say($"Дані відхилено: {ex.Message}"); }
+catch (StorageException ex) { Say($"Файл пошкоджено: {ex.Message}"); }
+finally { Console.CancelKeyPress -= onCtrlC; }
 ```
 
-Результат однаковий поелементно (`SequenceEqual` для record порівнює за значенням → «так»). **Читабельність**: у синтаксисі запитів групування і `let` (проміжна змінна `total`, щоб не рахувати `Sum` двічі) читаються як SQL, а сортування `orderby total descending, g.Key` записано одним рядком. Але в ньому немає `Take`, `ToList`, `Count` та перевантажень зі `StringComparer` — `ToList` довелося дописати методом, а `ThenBy(..., Ordinal)` замінити сортуванням за `int`-ключем. Для `Where → OrderBy → ThenBy → Take` (топ-N, дефіцит) методний ланцюжок читається зліва направо і коротший, тому основні звіти лишилися в методному синтаксисі.
+Ланцюжок токена: `cts.Token` (Cli) → `TimeoutPolicy.RunAsync` (зв'язаний токен, якщо задано `--timeout`) → `LendingService.ImportAsync(importer, path, progress, ct)` → `importer.LoadAsync(path, ct)` → `DeserializeAsync(stream, Options, ct)`; плюс `ct.ThrowIfCancellationRequested()` у циклі `LoadAsync` і в циклі `ImportAsync`. Для потоку: `ImportAsync(books, ct)` → `books.WithCancellation(ct)` → параметр `[EnumeratorCancellation] ct` у `StreamAsync` → `DeserializeAsyncEnumerable(…, ct)`.
 
-#### 4. Stopwatch на 100 000 записів
+### 4. Таблиця тестів
 
-`dotnet run -c Release --project src/Cli -- report-bench` (100 000 видань, 250 000 примірників; запит — `LowStock` з порогом 1; медіана з 10 запусків після прогріву; «алок.» — `GC.GetTotalAllocatedBytes` на один запуск):
+| Тест | Що перевіряє | Очікуваний результат |
+| :--- | :----------- | :------------------- |
+| `IssueCopy_WhenCopyAlreadyIssued_ThrowsDomainException_AndKeepsState` | Варіант: «примірник уже видано» | `DomainException` з «вже виданий»; у сховищі одна видача, за R-2 — нуль |
+| `ReturnCopy_WhenLoanAlreadyClosed_ThrowsDomainException_AndKeepsState` | Варіант: повернення невиданого примірника через сервіс | `DomainException`; дата першого повернення не змінилась, примірник на полиці |
+| `Return_OfCopyOnShelf_ThrowsDomainException` | Те саме правило на рівні `BookCopy` | `DomainException`; `IsIssued == false` |
+| `AddBook_WithYearOutOfRange_ThrowsArgumentOutOfRange_AndAddsNothing` (×2: 1449, 3000) | Поганий аргумент ≠ доменна помилка | `ArgumentOutOfRangeException`; сховище порожнє |
+| `AddBook_WithIsbnAlreadyInCatalog_ThrowsDomainException` (×2: з дефісами і без) | Унікальність ISBN у каталозі | `DomainException`; у сховищі одне видання |
+| `IssueCopy_OverReaderLimit_ThrowsDomainException` | Ліміт 5 незакритих видач | `DomainException`; активних видач рівно 5 |
+| `AddBook_RaisesChangedExactlyOnce` | Подія тижня 6 | Рівно одна подія `BookAdded` з id нової книги |
+| `IssueCopy_WhenRejected_RaisesNoEvent` | Подія лише після успішної зміни | Список подій порожній |
+| `LowStock_CountsOnlyBelowThreshold` (×4: 0→0, 1→2, 4→3, 5→4) | Звіт на кількох наборах (`[Theory]`) | Кількість рядків дорівнює очікуваній |
+| `TopBooks_IsDeterministic` | Топ-2 за кількістю примірників | `["B-BIG", "B-MID"]` |
+| `TopBooks_OnTie_OrdersByBookId_RegardlessOfSourceOrder` | Другий ключ `ThenBy` | `["B-1", "B-2"]` і для прямого, і для оберненого джерела |
+| `Totals_OnTestData_ComputesAggregates` | Агрегати | `(4, 9, 2.25, 5)` |
+| `Totals_OnEmptySource_ReturnsZeros` | Порожнє джерело | `(0, 0, 0, 0)` без винятку |
+| `ImportAsync_WhenAlreadyCancelled_Throws` | Заздалегідь скасований токен | `OperationCanceledException` (файл `any.json` навіть не відкривається) |
+| `ImportAsync_WhenCancelledDuringLoop_StopsAfterCurrentRecord` | `ThrowIfCancellationRequested` у циклі | `OperationCanceledException`; додано рівно 1 з 4 |
+| `ImportAsync_RaisesEventPerAddedBook_AndIsIdempotent` | Подія на кожен запис + ідемпотентність | Перший імпорт 4, другий 0; подій `BookAdded` — 4 |
+| `ImportAsync_SkipsBookWithIsbnAlreadyInCatalog` | Інший id, той самий ISBN | Додано 0 |
+| `LoadAsync_FileWithInvalidRecord_ThrowsDomainException_WithRecordNumber` | Тимчасовий файл із роком 2099 у записі 2 | `DomainException` «Запис 2: …», `InnerException` — `ArgumentOutOfRangeException` |
+| `ImportAsync_FromFileWithInvalidRecord_AddsNothing` | Атомарність імпорту списком | `DomainException`; сховище порожнє |
+| `StreamImport_StopsAtInvalidRecord_KeepingEarlierOnes` | Потоковий імпорт (дод. 1) | `DomainException` «Запис 3: …»; два перші записи вже додано |
+| `LoadAsync_MalformedJson_ThrowsStorageException_KeepingJsonInner` | Технічна помилка не маскується під доменну | `StorageException`, `InnerException` — `JsonException` |
+| `TimeoutPolicy_WhenTimeoutElapses_ThrowsTimeoutException` | Зв'язані токени: спрацював тайм-аут (дод. 2) | `TimeoutException`; токен користувача не скасовано |
+| `TimeoutPolicy_WhenUserCancels_ThrowsOperationCanceled` | …а тут — користувач | `OperationCanceledException`, не `TimeoutException` |
+
+Разом 22 тестові методи, 28 випадків (`[Theory]` дає окремий випадок на кожен `[InlineData]`). Файлова система — лише в чотирьох тестах `ImportTests` з тимчасовим файлом `core-tests-<guid>.json` у `Path.GetTempPath()`, який видаляється у `finally`.
+
+### 5. Вивід
+
+`dotnet test` (двічі поспіль — однаковий результат):
 
 ```text
- Згенеровано 100,000 видань і 250,000 примірників за 167 мс; кожен варіант — 10 запусків після прогріву, збірка Release
-
- LowStock: Where → OrderBy → ToList (як у ReportService) медіана     74.2 мс  мін     48.7 мс  алок.   24.5 МБ  рядків 8,334
- ToList після кожного кроку ланцюжка                     медіана     78.8 мс  мін     42.1 мс  алок.   29.3 МБ  рядків 8,334
- OrderBy → Where (сортуються всі видання)                медіана     98.1 мс  мін     82.9 мс  алок.   26.7 МБ  рядків 8,334
- відкладений запит: Count() + ToList() — 2 проходи       медіана    144.7 мс  мін    111.4 мс  алок.   48.7 МБ  рядків 8,334
- матеріалізовано один раз: ToList(), потім .Count        медіана     70.8 мс  мін     48.6 мс  алок.   24.4 МБ  рядків 8,334
+Test run for ...\tests\Core.Tests\bin\Debug\net10.0\Core.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+Passed!  - Failed:     0, Passed:    28, Skipped:     0, Total:    28, Duration: 190 ms - Core.Tests.dll (net10.0)
+Passed!  - Failed:     0, Passed:    28, Skipped:     0, Total:    28, Duration: 168 ms - Core.Tests.dll (net10.0)
 ```
 
-Висновки: (1) `ToList` у середині ланцюжка майже не змінює час (+6 %), але додає ~5 МБ алокацій на копії проміжних списків — користі немає, якщо проміжний результат не використовується вдруге. (2) `Where` після `OrderBy` повільніший на ~30 %: сортуються всі 100 000 рядків замість 8 334 відфільтрованих. (3) Подвійне перебирання відкладеного запиту — найдорожче: `GroupJoin` над 250 000 примірників виконується двічі (×2 час і алокації); `ToList` один раз і читання властивості `.Count` вирівнює його з основним варіантом. Більшу частину часу займає `GroupJoin` (хеш-таблиця примірників за ISBN), а не фільтр і сортування.
+`dotnet run --project src/Cli -- --import-async` (рядок прогресу перемальовується через `\r`, у терміналі видно останній стан):
 
-### 7. Самоперевірка
+```text
+Сховище: InMemoryBookStore
+Імпорт data\catalog.json; Ctrl+C — скасувати
+ Прогрес: 100% [####################]
+Імпортовано записів: 17
+Подій Changed: 17; видань у каталозі: 36
+```
 
-1. У `Program.cs` немає жодного `Where`/`GroupBy`/`OrderBy`/`Select` над даними — лише виклики `ReportService`, `FirstOrDefault` для назви команди і вивід (`grep -E "\.(Where|GroupBy|OrderBy|Select)\(" src/Cli/Program.cs` — нічого). `Where` у `Cli` є лише в `DeferredDemo.cs` — це демонстрація самого оператора, не звіт.
-2. Два запуски `report-top` — однаковий порядок рядків; `--shuffle` × 3 — той самий результат для всіх звітів (розділ 4).
-3. `report-low --empty`, `report-sum --empty`, `report-all --empty` не падають.
-4. Кожен звіт повертає DTO (`LoanLine`, `ReaderStat`, `StockLine`, `GroupSummary`, `OverdueLine`) або кортеж чисел, а не `Book`/`Loan`.
-5. `AsParallel` у проєкті немає (`grep -rn AsParallel src --include=*.cs` — нічого; `grep Console` по `src/Core/**/*.cs` — теж нічого); вкладених циклів для фільтрів/групувань немає — `copies` до видань приєднуються `GroupJoin`, а не циклом у циклі.
+`--import-async --file`, перший і другий запуск (ідемпотентність):
 
-`dotnet build` — `0 Warning(s)`, `0 Error(s)`; режими `--events`, `--service`, `--sinks`, `--file`, `--import`, `--domain` працюють.
+```text
+Сховище: FileBookStore
+Файл: ...\src\Cli\bin\Debug\net10.0\data\library.json (є з попереднього запуску)
+Імпорт data\catalog.json; Ctrl+C — скасувати
+ Прогрес: 100% [####################]
+Імпортовано записів: 17
+Подій Changed: 17; видань у каталозі: 18
+...
+Імпортовано записів: 0
+Подій Changed: 0; видань у каталозі: 18
+```
 
-### 8. Definition of Done (Лабораторна робота 7)
+Скасування тайм-аутом — `--import-async --big --timeout 2`:
 
-- [x] 4–5 різних LINQ-сценаріїв у `Core`: `Where` (`Overdue`, `LowStock`), `Select` у DTO, `GroupBy` (`TopReaders`, `ByDecade`), агрегати (`Totals`), топ-N (`TopReaders`, `TopBooks`).
-- [x] Звіти приймають `IEnumerable<T>` і повертають `IReadOnlyList<DTO>`.
-- [x] Топ-N має другий ключ сортування (`ThenBy(..., StringComparer.Ordinal)` усередині `TopBy`).
-- [x] Порожнє джерело обробляється без винятку.
-- [x] `Cli` має 8 підкоманд звітів (+ `report-all`, `report-deferred`, `report-bench`) з вирівнюванням колонок.
-- [x] Демо відкладеного виконання працює і пояснене (розділ 5 + коментар у `ReportService.cs`).
-- [x] Лише LINQ to Objects (без PLINQ і LINQ to SQL).
-- [x] `SampleData` розширено (19 видань у 5 десятиліттях, 52 примірники, 21 видача), коміт `lab07`.
+```text
+Сховище: InMemoryBookStore
+Генерую 1,000,000 видань у C:\Users\Admin\AppData\Local\Temp\crossapp-catalog-1000000.json …
+Імпорт C:\Users\Admin\AppData\Local\Temp\crossapp-catalog-1000000.json, тайм-аут 2 с; Ctrl+C — скасувати
+Імпорт скасовано: Операцію перервано тайм-аутом 2 с.
+```
+
+Скасування Ctrl+C (`--import-async --big`, натиснути під час імпорту): гілка `catch (OperationCanceledException)` друкує рядок `Імпорт скасовано.` — без стектрейсу, код виходу 1. Тимчасовий файл видаляється у `finally` в обох випадках.
+
+Зіпсовані й відсутні файли:
+
+```text
+> --import-async data/catalog_bad.json
+Дані відхилено: Запис 3: Рік видання має бути в межах 1450..2026 (Parameter 'year')
+
+> --import-async data/catalog_bad.json --stream
+Дані відхилено: Запис 3: Рік видання має бути в межах 1450..2026 (Parameter 'year')
+
+> --import-async data/sample.csv
+Файл пошкоджено: Файл sample.csv не є коректним JSON-списком видань: 'i' is an invalid start of a value. Path: $ | LineNumber: 0 | BytePositionInLine: 0.
+
+> --import-async data/nope.json
+Файл не знайдено: data/nope.json
+```
+
+### 6. DomainException і ArgumentException у проєкті
+
+`ArgumentException` (і `ArgumentOutOfRangeException`, `ArgumentNullException`) означає, що *викликач* передав методу значення, яке поза його контрактом, незалежно від стану бібліотеки: порожній ISBN або ISBN неправильної довжини (`IsbnRules.Normalize`), рік видання 2099 (`Book.Create`), порожній `readerId` (`IssueCopy`), дата повернення раніше дати видачі (`Loan.Close`). Такий виклик неправильний за будь-якого стану бібліотеки. `DomainException` означає, що аргументи коректні, але операцію забороняє *поточний стан* бібліотеки: «Примірник C-001 вже виданий, повторна видача неможлива» (`BookCopy.Issue`), «Примірник … і так на полиці, повернути його неможливо» (`BookCopy.Return`), «Видача … вже закрита» (`Loan`), дубль ISBN у каталозі, ліміт 5 видач читача, вилучення видання з примірниками, «Немає примірника з id=…» (`LendingService`). Той самий виклик `IssueCopy("C-001", "R-2", …)` учора був би успішним. Межа проходить і через імпорт: у `Book.FromDto` рік 2099 — це `ArgumentOutOfRangeException`, але для `JsonCatalogImporter` це вже погані дані каталогу, тож він загортає їх у `DomainException("Запис 3: …", ex)`, а початковий виняток лишає в `InnerException`. Третя категорія — технічні збої (`FileNotFoundException`, `JsonException` → `StorageException`, `InvalidDataException` у `FileBookStore`, `InvalidOperationException` сховища на дубль id): їх не видаю за доменні, бо з правилами бібліотеки вони не пов'язані, і реакція на них інша («перевірте файл», а не «примірник уже видано»).
+
+### 7. Додаткові завдання
+
+1. **`IAsyncEnumerable<Book>` + `[EnumeratorCancellation]`.** `JsonCatalogImporter.StreamAsync` віддає видання по одному з `JsonSerializer.DeserializeAsyncEnumerable`; `LendingService.ImportAsync(IAsyncEnumerable<Book>, ct)` перебирає їх через `await foreach (… in books.WithCancellation(ct))`, і цей токен через атрибут потрапляє в параметр `StreamAsync`. Оскільки `yield return` не можна писати в `try` з `catch`, `MoveNextAsync` викликається вручну в маленькому `try`, щоб загорнути `JsonException`. Ціна потоковості — неатомарність: тест `StreamImport_StopsAtInvalidRecord_KeepingEarlierOnes` фіксує, що записи до поганого вже в каталозі, а `ImportAsync_FromFileWithInvalidRecord_AddsNothing` — що варіант зі списком не додає нічого. Запуск: `--import-async --stream`.
+2. **Зв'язані токени.** `TimeoutPolicy.RunAsync` створює `CancellationTokenSource(timeout)` і `CreateLinkedTokenSource(userToken, timeoutToken)`; якщо скасування спричинив тайм-аут, а не користувач (`timeoutSource.IsCancellationRequested && !userToken.IsCancellationRequested`), кидає `TimeoutException` з `OperationCanceledException` в `InnerException`. Тести `TimeoutPolicy_WhenTimeoutElapses_ThrowsTimeoutException` і `TimeoutPolicy_WhenUserCancels_ThrowsOperationCanceled` на `NeverEndingImporter` (`Task.Delay(Infinite, ct)`) доводять, яке з джерел спрацювало. Запуск: `--timeout 2`.
+3. **`IProgress<int>`.** `ImportAsync(importer, path, progress, ct)` повідомляє відсоток опрацьованих записів лише тоді, коли він змінився (на мільйоні записів — 101 виклик, а не мільйон). Підписник `ConsoleProgress` у Cli малює `Прогрес:  42% [########            ]` в одному рядку через `\r`. Це власний синхронний клас, а не `Progress<T>`: той у консолі викликає обробник через пул потоків, і «Імпортовано записів» могло б надрукуватися раніше за останні відсотки. Тест `ImportAsync_WhenCancelledDuringLoop_…` використовує той самий прийом (`CallbackProgress`), щоб скасувати імпорт після першого запису.
+4. **Покриття** (`dotnet test --collect:"XPlat Code Coverage"`, coverlet із шаблону xunit): усього по `Core` — **37,6 % рядків, 20,3 % гілок**. Новий код тижня 8 покритий добре: `JsonCatalogImporter.LoadAsync` 89 %, `StreamAsync` 78 %, `TimeoutPolicy` 91 %, `LendingService.ImportAsync` 82–100 %, `DomainException`/`StorageException` 100 %; `BookCopy` 91 %, `Book` 85 %, `LendingService` загалом 75 %. Непокриті (0 %) — імпортери CSV/JSON тижнів 2–4, `FileBookStore`, `CachingBookStore`, `SampleData`, `EnvironmentInfo`, `ReportBenchmarks`, а також частина `ReportService` (40 %: `Overdue`, `ByDecade`, `Join`-звіти) і `Loan.FromDto` (52 %). Поки це прийнятно: CSV-імпортери — код лаб 2–4, який перевірено вручну виводами з README_labs1-4 і який не входить у ланцюжок тижнів 10–11; `FileBookStore` — інфраструктура, яку на тижні 11 замінить EF Core (тестуватиметься інтеграційно, а не модульно); `SampleData`/`EnvironmentInfo`/`ReportBenchmarks` — демо-дані й діагностика без бізнес-правил. Наступні кандидати на тести — `ReportService.Overdue` і `Loan.FromDto` (правила узгодженості статусу й дат).
+
+### 8. Самоперевірка
+
+1. `grep -rnE "\.Result\b|\.Wait\(\)|async void|Task\.Run" src tests --include=*.cs` — єдиний збіг — коментар у `JsonCatalogImporter.cs` («без Task.Run навколо File.ReadAllText»). Обробник `Console.CancelKeyPress` — звичайна синхронна лямбда; тести — `async Task`.
+2. `dotnet test` двічі поспіль — 28/28 обидва рази; кожен тест створює власне `InMemoryBookStore`, `TestData` щоразу повертає нові об'єкти, статичного змінного стану немає.
+3. Жоден тест не читає `data/`; тимчасові файли мають унікальні імена й видаляються у `finally` (`WithTempFileAsync`).
+4. Кожен тест має щонайменше один `Assert` на конкретний тип (`Assert.Throws<DomainException>`, а не `<Exception>`); `ThrowsAnyAsync<OperationCanceledException>` — свідомо, бо скасування може прийти як `TaskCanceledException`.
+5. Токен передано в кожен `await`: `LoadAsync(path, ct)`, `DeserializeAsync(…, ct)`, `DeserializeAsyncEnumerable(…, ct)`, `WithCancellation(ct)`, `SerializeAsync(…, ct)`, `Task.Delay(…, ct)`; у циклах — `ThrowIfCancellationRequested`.
+
+`dotnet build` — `0 Warning(s)`, `0 Error(s)`; режими `--events`, `--service`, `--sinks`, `--import`, `--domain`, `--info`, `report-all [--file|--cache|--empty]` працюють, як раніше.
+
+### 9. Definition of Done (Лабораторна робота 8)
+
+- [x] Проєкт `tests/Core.Tests` у solution, посилання лише на `Core`.
+- [x] Асинхронне читання через `FileStream(useAsync: true)` + `DeserializeAsync`, без `Task.Run`.
+- [x] `CancellationToken` у сигнатурі, перевіряється в циклі і передається далі (розділ 3).
+- [x] Cli реагує на Ctrl+C і тайм-аут повідомленням, а не стектрейсом.
+- [x] Власний `DomainException` для бізнес-помилок (`BookCopy`, `Loan`, `LendingService`).
+- [x] ≥ 5 тестів (22 методи / 28 випадків): інваріанти, подія, звіт, скасування; `dotnet test` зелений.
+- [x] Немає `async void`, `.Result`, `.Wait()`.
+- [x] README: як запустити тести і як перевірити скасування. Коміт `lab08` — після перевірки.
 - [x] Виконано всі 4 додаткові завдання.
 
-### 9. Відповіді на питання на захисті
+### 10. Відповіді на питання на захисті
 
-1. **Які оператори виконуються відкладено, а які запускають ітерацію негайно?** Відкладено — ті, що повертають `IEnumerable<T>`: `Where`, `Select`, `OrderBy`/`ThenBy`, `GroupBy`, `Join`/`GroupJoin`, `Take`, `Skip`, а також мій `TopBy`. Негайно — ті, що повертають одне значення або колекцію: `ToList`, `ToArray`, `ToDictionary`, `ToLookup`, `Count()`, `Sum`, `Average`, `Max`, `Any`, `First`/`FirstOrDefault`/`Single`, `SequenceEqual`; і, звісно, `foreach`.
-2. **Що станеться, якщо змінити джерело після побудови запиту, але до ToList?** Запит побачить нове джерело: у демо після `source.Add(L-999)` `Count()` дав 8 замість 7, а після `source.Clear()` — 0. Якщо ж змінити список *під час* перебирання — `InvalidOperationException: Collection was modified`.
-3. **Чому результат, який використовується двічі, варто матеріалізувати?** Кожне перебирання відкладеного запиту виконує всі оператори заново (у демо — 21, потім ще 22 виклики предиката; у бенчмарку `Count()` + `ToList()` — удвічі довше і вдвічі більше алокацій). Для джерела на `File.ReadLines` — це ще й повторне читання файлу, а між двома проходами дані можуть змінитися, і два числа одного звіту не збіжуться.
-4. **Які оператори змушені зібрати всю послідовність у пам'ять і чим це загрожує?** `OrderBy`/`OrderByDescending`/`ThenBy`, `GroupBy`, `GroupJoin`/`Join` (внутрішня послідовність — у хеш-таблицю), `Reverse`, `Distinct` (множину бачених), `ToList`. Загроза — пам'ять O(n) і затримка до першого елемента (потоковість втрачається: `W1 W2 W3`, потім `S3`), на нескінченній послідовності — зависання. Тому `Where` ставлю до `OrderBy`/`Join`.
-5. **Різниця між властивістю Count і методом Count().** `List<T>.Count`/`IReadOnlyCollection<T>.Count` — властивість: число вже зберігається в об'єкті, O(1). `Enumerable.Count()` — метод розширення для будь-якого `IEnumerable<T>`: для відкладеного запиту проходить усю послідовність (виконуючи запит), для колекції може взяти властивість. `Count(predicate)` завжди проходить усе.
-6. **Навіщо проєкція в DTO, якщо можна повернути сутності?** (1) Контракт звіту не залежить від моделі: `StockLine` містить `Copies`/`OnShelf`, яких у `Book` немає, а перейменування поля в `Book` не зламає Api/Blazor. (2) Сутності мають поведінку (`Issue`, `Close`) — звіт не повинен давати змінювати стан. (3) `Loan` тримає посилання на `BookCopy` — серіалізація в JSON (тиждень 10) тягнула б граф об'єктів. (4) Record порівнюються за значенням — зручно в тестах тижня 8 (`SequenceEqual` у `report-query`).
-7. **Що поверне Average для порожньої колекції і як ви це обробили?** Для `int`/`double` — кине `InvalidOperationException: Sequence contains no elements` (так само `Max`, `Min`); для `int?` поверне `null`; `Sum` і `Count` повернуть 0. У `Totals` перевіряю `stock.Count == 0` і повертаю `(0, 0, 0d, 0)` до виклику `Average`/`Max` (`report-sum --empty`).
-8. **Навіщо ThenBy у топ-N?** При рівних значеннях головного ключа порядок без `ThenBy` — це порядок джерела (`OrderBy` стабільний), а він залежить від сховища: словник, JSON-файл, у тижні 11 — БД без `ORDER BY`. Тоді на межі `Take(5)` між R-005 і R-006 (по 2 видачі) переможець «стрибає». Унікальний другий ключ (`ReaderId`, `BookId`) робить результат детермінованим — перевірено `--shuffle`.
-9. **First / FirstOrDefault / Single — різниця і коли буде виняток?** `First` — перший елемент, виняток, якщо елементів немає. `FirstOrDefault` — перший або `default` (`null` для `string`, як `args.FirstOrDefault(...) ?? "report-top"`). `Single` — рівно один елемент: виняток, якщо 0 **або** більше одного (перевіряє унікальність, тому проходить далі першого збігу); `SingleOrDefault` — `default` для 0, виняток для 2+.
-10. **Що зміниться у ваших запитах, коли джерелом стане IQueryable в EF Core?** Лямбди стануть деревами виразів (`Expression<Func<…>>`), і провайдер перекладе `Where`/`GroupBy`/`OrderBy`/`Select` у SQL. Не перекладаються довільні C#-методи: `IsbnRules.Compact`, `StringComparer.Ordinal`/`OrdinalIgnoreCase` у `GroupBy`/`ThenBy` (порівняння задає collation БД), обчислювана `DueOn` (немає колонки) — їх треба замінити на поля/вирази, які розуміє SQL, або виконати після `AsEnumerable()`. Сигнатури варто змінити на `IQueryable<T>`, а `ToList` — на `ToListAsync`. `Join` за навігаційною властивістю замінить `Include`/вкладений `Select`.
-11. **Де у вашому проєкті ручний цикл виправданіший за LINQ?** У `SampleData` (створення примірників з лічильником id і заповнення двох колекцій одночасно), у `FileBookStore.EnsureLoaded` (послідовне відновлення з побічним ефектом `Put` і винятком з контекстом), в імпортерах (рядок за рядком з номером рядка, колбеком `onSkipped` і `try/catch` на кожен рядок) і в `BenchDemo.Measure` (вимір часу кожної ітерації). Там важливі побічні ефекти, порядок і обробка помилок, а LINQ-лямбди з побічними ефектами читаються гірше.
+1. **Що насправді робить await? Чи створює він потік?** Не створює. `await` перевіряє, чи задача вже завершена; якщо ні — реєструє решту методу як продовження (continuation) і повертає керування викликачу, а потік вільний для іншої роботи. Коли ОС повідомить про завершення вводу-виводу (порт завершення I/O), продовження виконається на потоці з пулу (у консолі контексту синхронізації немає). Під час читання файлу каталогу жоден потік не «сидить» і не чекає на диск.
+2. **Чому Task.Run навколо File.ReadAllText — не асинхронний ввід-вивід?** `File.ReadAllText` блокує потік на весь час читання; `Task.Run` лише переносить це блокування з поточного потоку на потік пулу. Зайнятий потік так і лишається, а на сервері (тиждень 10) це забирає потоки в обробки запитів. Справжній async — `FileStream(useAsync: true)`/`ReadAllTextAsync`: запит іде в ОС, потік звільняється.
+3. **Чим небезпечні .Result і .Wait() у консольному застосунку?** Вони блокують потік до завершення задачі (витрачаючи його даремно) і загортають виняток в `AggregateException`. У середовищах із контекстом синхронізації (WinForms/WPF, старий ASP.NET) — класичний deadlock: потік чекає задачу, а продовження задачі чекає цей самий потік. У консолі deadlock рідший, але звичка переходить у Blazor/Api. Тому — top-level `await`.
+4. **Чому async void заборонений і чому обробники подій — виняток?** `async void` не повертає `Task`: його не можна дочекатися, не можна дізнатися, коли він завершився, а виняток із нього летить у контекст синхронізації/пул і валить процес — `try/catch` у місці виклику його не бачить. Обробники подій мусять мати сигнатуру `void (object, EventArgs)`, тому там `async void` допустимий, але всередині слід ловити винятки самому. У моєму коді його немає зовсім: обробник `CancelKeyPress` синхронний (лише `cts.Cancel()`), тести — `async Task`.
+5. **OperationCanceledException — це помилка? Як обробляєте і чому окремим catch?** Ні, це очікуваний результат: користувач сам попросив зупинитися. Тому `catch (OperationCanceledException)` стоїть першим і друкує «Імпорт скасовано.», а не «помилку»; якби першим був `catch (Exception)`, скасування виглядало б як збій. У `Core` OCE ніде не ловиться і не загортається в `DomainException` — проходить наскрізь (`catch (ArgumentException)` у `ToBook` його не зачіпає).
+6. **Хто створює CancellationToken, а хто його перевіряє?** Створює і скасовує власник `CancellationTokenSource` — `Program.cs` (Ctrl+C), `TimeoutPolicy` (тайм-аут), тест (`CancelAsync`). Перевіряють операції, що його отримали: `LendingService.ImportAsync` і `JsonCatalogImporter` (`ThrowIfCancellationRequested` у циклах), а також BCL-методи, яким його передано (`DeserializeAsync`, `Task.Delay`). Сам токен може лише «слухати», скасувати через нього не можна.
+7. **Коли кидати DomainException, а коли ArgumentException?** Див. розділ 6. Коротко: `ArgumentException` — значення неправильне за будь-якого стану (`Book.Create(…, year: 2099)` → `ArgumentOutOfRangeException`); `DomainException` — значення правильне, але правило бібліотеки забороняє операцію зараз (`IssueCopy` виданого примірника → «Примірник … вже виданий»).
+8. **Навіщо зберігати inner exception при обгортанні JsonException?** У `JsonException` — точне місце помилки (`Path: $[3].year | LineNumber: 12 | BytePositionInLine: 18`) і стек серіалізатора. Без `InnerException` лишилося б «файл поганий» без жодної підказки, де саме; у лозі (тиждень 14) потрібен саме ланцюжок. Тест `LoadAsync_MalformedJson_…` перевіряє, що inner на місці.
+9. **Чому в тестах сховище в пам'яті, а не файлове?** Тест перевіряє правило сервісу, а не диск: `InMemoryBookStore` швидкий, не залежить від прав доступу, шляхів, стану файлу з попереднього запуску і від паралельних тестів. Кожен тест отримує свіже сховище — порядок запуску неважливий. Це те, заради чого на тижні 5 з'явився `IBookStore`. Файлове сховище — інфраструктура, її перевіряють інтеграційними тестами окремо.
+10. **Що дає [Theory] з [InlineData] порівняно з кількома [Fact]?** Одна логіка перевірки — багато наборів даних: `LowStock_CountsOnlyBelowThreshold` перевіряє межу 0/1/4/5 одним методом замість чотирьох копій. Кожен `[InlineData]` — окремий випадок у звіті (`threshold: 4, expected: 3`), тож видно, який саме набір упав; додати набір — один рядок.
+11. **Як перевірили тестом, що подія піднялася рівно один раз?** Підписав лямбду, яка додає `EventArgs` у `List<LibraryChangedEventArgs>`, виконав `AddBook` і викликав `Assert.Single(events)`: він падає і на 0, і на 2+ подіях, а заодно повертає елемент для перевірки `Kind == BookAdded` і `EntityId`. Тесту не потрібні ні консоль, ні диск: подія — це просто виклик делегата, а сховище — у пам'яті. Парний тест `IssueCopy_WhenRejected_RaisesNoEvent` перевіряє `Assert.Empty` після відмови.
 
-### 10. Що змінилося в коді попередніх лабораторних
+### 11. Що змінилося в коді попередніх лабораторних
 
-- Сценарій лабораторної 6 перенесено з `Program.cs` у `EventsDemo.cs` без змін логіки; тепер він запускається з ключем `--events`. Без ключів запускається `report-top`.
-- `SampleData.Items()`: 19 видань замість 15 (додано B-016…B-019), 52 примірники замість 20 (від 1 до 5 на видання), 21 видача замість 4 (сім читачів). Перші видання і ISBN ті самі, але id примірників зсунулися (наприклад, L-002 тепер про C-012), тож вивід розділу 5 лаб. 6 і списків лаб. 5 відрізняється від збереженого в README_lab06.md / README_lab05.md.
-- `StoreFactory`: новий ключ `--empty` (порожнє `InMemoryBookStore`).
-- Аргумент, що починається з `report`, більше не сприймається як шлях до файлу імпорту (лаб. 3: `dotnet run -- data/mixed.csv` працює як раніше).
+- Бізнес-правила в `BookCopy`, `Loan`, `LendingService` кидають `DomainException` замість `InvalidOperationException`; тексти повідомлень не змінилися. Перевірки аргументів лишилися `ArgumentException`. `InvalidOperationException` лишився тільки у сховищ (дубль id).
+- `EventsDemo`, `ServiceDemo`, `SinkDemo`, `EntityImport` перехоплюють `DomainException` (`ServiceDemo` — ще й `InvalidOperationException` для демонстрації «дубль id у сховищі»).
+- Розділ лабораторної 7 перенесено в [README_lab07.md](README_lab07.md).
