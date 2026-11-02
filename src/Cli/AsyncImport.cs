@@ -22,7 +22,7 @@ internal sealed record AsyncImportOptions(string Path, TimeSpan? Timeout, bool S
         int? big = int.TryParse(ValueAfter("--big"), out int count) ? count
             : args.Contains("--big") ? DefaultBig : null;
 
-        return new(ValueAfter("--import-async") ?? System.IO.Path.Combine("data", "catalog.json"),
+        return new(ValueAfter("--import-async") ?? AppSettings.Sample("catalog.json"),
             timeout, args.Contains("--stream"), big);
     }
 }

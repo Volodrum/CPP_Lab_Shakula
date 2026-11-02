@@ -2,7 +2,7 @@ using Core.Dto;
 using Core.Import;
 
 // Лабораторна 3: імпорт CSV/JSON (запуск: dotnet run --project src/Cli -- --import [шлях]
-// або dotnet run --project src/Cli -- data/mixed.csv).
+// або dotnet run --project src/Cli -- samples/mixed.csv).
 // Лабораторна 6, дод. завдання 2: про пропущені рядки імпортер повідомляє через Action<string> під час читання.
 internal static class ImportDemo
 {

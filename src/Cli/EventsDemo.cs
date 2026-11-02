@@ -75,7 +75,7 @@ internal static class EventsDemo
 
         Console.WriteLine("=== 5. Func замість події, коли потрібна відповідь ===");
         IReadOnlyList<Loan> overdue = service.Search<Loan>(l => l.IsActive && l.DueOn < today);
-        Console.WriteLine($" Прострочені видачі (строк {Loan.LoanPeriodDays} днів): {overdue.Count}");
+        Console.WriteLine($" Прострочені видачі (строк нових видач {service.LoanDays} дн., у старих — свій): {overdue.Count}");
         foreach (Loan l in overdue)
             Console.WriteLine($"  {l.Id}: примірник {l.Copy.Id}, читач {l.ReaderId}, мав повернути до {l.DueOn:dd.MM.yyyy}");
         IReadOnlyList<Book> noneOnShelf = service.Search<Book>(b => service.CopiesOf(b).All(c => c.IsIssued));

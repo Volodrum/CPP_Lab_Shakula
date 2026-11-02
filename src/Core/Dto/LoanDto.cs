@@ -6,4 +6,5 @@ public sealed record LoanDto(
     string ReaderId,
     DateOnly IssuedOn,
     DateOnly? ReturnedOn,
-    string Status) : LibraryItemDto(Id);
+    string Status,
+    int LoanDays = 14) : LibraryItemDto(Id); // у файлах до тижня 9 поля loanDays немає — тоді строк за замовчуванням

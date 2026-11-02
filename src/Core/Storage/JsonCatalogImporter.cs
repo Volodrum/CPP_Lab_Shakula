@@ -6,7 +6,7 @@ using Core.Dto;
 
 namespace Core.Storage;
 
-// Тиждень 8: асинхронне читання каталогу з JSON-списку BookDto (формат data/sample.json тижня 3).
+// Тиждень 8: асинхронне читання каталогу з JSON-списку BookDto (формат samples/sample.json тижня 3).
 // Справжній асинхронний ввід-вивід: FileStream(useAsync: true) + DeserializeAsync, без Task.Run навколо File.ReadAllText.
 public sealed class JsonCatalogImporter : ICatalogImporter
 {

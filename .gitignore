@@ -459,3 +459,9 @@ pub/
 publish/
 [Pp]ub/
 [Pp]ublish/
+# Лаб. 9: дані каталогу створюються під час роботи програми; секрети — лише в user-secrets / змінних середовища
+data/
+**/data/
+secrets.json
+appsettings.*.local.json
+*.json.tmp

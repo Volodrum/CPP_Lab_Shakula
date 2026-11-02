@@ -8,39 +8,77 @@ using Core.Storage;
 
 Console.OutputEncoding = Encoding.UTF8;
 
+// ---------- Лабораторна 9: конфігурація (appsettings → user-secrets → змінні CROSSAPP_* → --Ключ=значення) ----------
+AppSettings settings;
+try
+{
+    settings = AppSettings.Load(args);
+}
+catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or FormatException or ArgumentException)
+{
+    // Зіпсований appsettings.json, «MinimumLevel": "Loud" чи «LoanDays": "abc» — зрозуміле повідомлення замість stack trace.
+    Console.WriteLine($"Помилка конфігурації: {ex.Message}");
+    if (ex.InnerException is not null) Console.WriteLine($" причина: {ex.InnerException.Message}");
+    return 2;
+}
+
+// Перший аргумент після команди, що не є ключем (--file, --Storage:FileName=…): export my.json → "my.json".
+string? Operand() => args.Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
+
 // ---------- Режими попередніх лабораторних ----------
 switch (args)
 {
+    case ["config", ..]:
+        return CollectionCommands.ShowConfig(settings);
+    case ["export", ..]:
+        return CollectionCommands.Export(settings, Operand());
+    case ["import", ..]:
+        return CollectionCommands.Import(settings, Operand());
     case ["--info" or "--env", ..]:
         return PrintEnvironment();
     case ["--domain", ..]:
-        // Лабораторна 4; з тижня 5 сервіс отримує сховище ззовні.
-        return DomainDemo.Run(args.Length > 1 ? args[1] : Path.Combine("data", "books_domain.csv"),
+        // Лабораторна 4; з тижня 5 сервіс отримує сховище ззовні. З тижня 9 зразки — у bin/…/samples, а не відносно cwd.
+        return DomainDemo.Run(args.Length > 1 ? args[1] : AppSettings.Sample("books_domain.csv"),
             new LendingService(new InMemoryBookStore()));
     case ["--import", ..]:
-        return ImportDemo.Run(args.Length > 1 ? args[1] : Path.Combine("data", "sample.csv"));
+        return ImportDemo.Run(args.Length > 1 ? args[1] : AppSettings.Sample("sample.csv"));
     case [var file, ..] when !file.StartsWith("--") && !file.StartsWith("report"):
         return ImportDemo.Run(file);
 }
 
 // ---------- Composition root (лаб. 5): єдине місце, де обирається реалізація сховища ----------
-string dataPath = Path.Combine(AppContext.BaseDirectory, "data", "library.json");
+// З тижня 9 шлях до файлу — з конфігурації (Storage:*, CROSSAPP_DATA_PATH), а не з літерала в коді.
+string dataPath = settings.DataFile;
 IBookStore store = StoreFactory.Create(args, dataPath); // --file → FileBookStore, --empty → порожнє, інакше SampleData; --cache → декоратор
 
 Console.WriteLine($"Сховище: {(store is CachingBookStore ? store.ToString() : store.GetType().Name)}");
 if (args.Contains("--file"))
+{
     Console.WriteLine($"Файл: {dataPath} ({(File.Exists(dataPath) ? "є з попереднього запуску" : "ще не створено")})");
+    try
+    {
+        _ = store.List<Book>(); // FileBookStore читає файл ліниво — перевіряємо його тут, а не посеред звіту
+    }
+    catch (StorageException ex)
+    {
+        Console.WriteLine($"Файл пошкоджено: {ex.Message}");
+        return 1;
+    }
+}
+
+int loanDays = settings.Options.Library.LoanDays;
+settings.Log.Debug($"Library:LoanDays = {loanDays}: строк для нових видач LendingService");
 
 if (args.Contains("--service"))
-    return ServiceDemo.Run(new LendingService(store), store);
+    return ServiceDemo.Run(new LendingService(store, loanDays: loanDays), store);
 
 if (args.Contains("--sinks")) // лаб. 6, дод. завдання 1: одержувачі сповіщень через конструктор замість події
 {
     string sinkLogPath = Path.Combine(AppContext.BaseDirectory, "logs", "sinks.log");
-    return SinkDemo.Run(new LendingService(store, new CompositeSink(new ConsoleSink(), new FileSink(sinkLogPath))), sinkLogPath);
+    return SinkDemo.Run(new LendingService(store, new CompositeSink(new ConsoleSink(), new FileSink(sinkLogPath)), loanDays), sinkLogPath);
 }
 
-var service = new LendingService(store);
+var service = new LendingService(store, loanDays: loanDays);
 
 if (args.Contains("--events")) // лаб. 6: доменні події (раніше запускалась без ключів)
     return EventsDemo.Run(service);
@@ -88,7 +126,7 @@ void RunReport(string report)
                 Console.WriteLine($" {r.ReaderId,-8} {r.Loans,6} {r.ActiveLoans,8}");
             break;
         case "report-overdue":
-            Header($"Прострочені видачі (строк {Loan.LoanPeriodDays} днів, на {today:dd.MM.yyyy})");
+            Header($"Прострочені видачі на {today:dd.MM.yyyy} (строк — свій у кожній видачі; нові: {service.LoanDays} дн.)");
             PrintLoans(ReportService.Overdue(loans, today));
             break;
         case "report-low":
@@ -138,6 +176,7 @@ void RunReport(string report)
         default:
             Console.WriteLine($" Невідома команда «{report}». Доступні:");
             Console.WriteLine($"  {string.Join(" | ", all)} | report-all | report-deferred | report-bench [кількість]");
+            Console.WriteLine("  лаб. 9: config | export [шлях] | import [шлях]; --Ключ=значення перекриває конфігурацію");
             Console.WriteLine("  ключі: --file | --empty | --shuffle | --cache; режими попередніх лаб: --import-async (лаб. 8) --events --service --sinks --import --domain --info");
             break;
     }

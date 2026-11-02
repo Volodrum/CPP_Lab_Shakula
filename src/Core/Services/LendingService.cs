@@ -9,12 +9,15 @@ namespace Core.Services;
 // Інваріанти однієї сутності перевіряють Book/BookCopy/Loan; тут — лише правила на кілька сутностей
 // (ліміт видач на читача, унікальний ISBN у каталозі, не вилучати видання з примірниками).
 // З тижня 6 сервіс повідомляє про кожну успішну зміну подією Changed; що робити з повідомленням — вирішує підписник.
-public sealed class LendingService(IBookStore store, INotificationSink? sink = null)
+// З тижня 9 строк нових видач приходить із конфігурації (Library:LoanDays): сервіс отримує число, а не IConfiguration.
+public sealed class LendingService(IBookStore store, INotificationSink? sink = null, int loanDays = Loan.DefaultLoanDays)
 {
     public const int MaxActiveLoansPerReader = 5;
 
     private readonly IBookStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly INotificationSink? _sink = sink; // додаткове завдання 1; без нього працює лише подія
+
+    public int LoanDays { get; } = ValidLoanDays(loanDays);
 
     public event EventHandler<LibraryChangedEventArgs>? Changed;
 
@@ -57,7 +60,7 @@ public sealed class LendingService(IBookStore store, INotificationSink? sink = n
                 $"Читач {readerId.Trim()} уже має {active} незакритих видач (ліміт {MaxActiveLoansPerReader}), " +
                 $"видати примірник {copy.Id} неможливо");
 
-        Loan loan = Loan.Open(NewId("L"), copy, readerId, issuedOn); // якщо copy.Issue() кине виняток — події не буде
+        Loan loan = Loan.Open(NewId("L"), copy, readerId, issuedOn, LoanDays); // якщо copy.Issue() кине виняток — події не буде
         _store.Add(loan);
         _store.Update(copy);
         OnChanged(LibraryChangeKind.CopyIssued, loan.Id, copy.Isbn, shelfDelta: -1, loan: loan);
@@ -196,6 +199,12 @@ public sealed class LendingService(IBookStore store, INotificationSink? sink = n
 
     private Loan GetLoan(string loanId) =>
         _store.GetById<Loan>(loanId) ?? throw new DomainException($"Немає видачі з id={loanId}.");
+
+    private static int ValidLoanDays(int loanDays)
+    {
+        Loan.EnsureLoanDays(loanDays);
+        return loanDays;
+    }
 
     private static string NewId(string prefix) => $"{prefix}-{Guid.NewGuid().ToString("N")[..8]}";
 }

@@ -49,7 +49,7 @@ public static class SampleData
         var day = new DateOnly(2026, 9, 1);
         var loans = new List<Loan>();
 
-        // closedAfter: null — видача відкрита; число — закрито через стільки днів. Строк — 14 днів (Loan.LoanPeriodDays).
+        // closedAfter: null — видача відкрита; число — закрито через стільки днів. Строк — 14 днів (Loan.DefaultLoanDays).
         void Lend(string bookId, int copyNo, string readerId, int issuedDay, int? closedAfter = null, bool lost = false)
         {
             DateOnly issuedOn = day.AddDays(issuedDay);

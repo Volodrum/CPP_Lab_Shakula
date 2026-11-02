@@ -7,244 +7,261 @@
 - **Репозиторій**: <https://github.com/Volodrum/CPP_Lab_Shakula>
 - **Середовище вимірювань**: Windows 11 Home x64 (10.0.26200), .NET SDK 10.0.400, runtime .NET 10.0.11
 
-> Опис лабораторних 1–4 (з виводами консолі) — у [README_labs1-4.md](README_labs1-4.md), лабораторної 5 — у [README_lab05.md](README_lab05.md), лабораторної 6 — у [README_lab06.md](README_lab06.md), лабораторної 7 — у [README_lab07.md](README_lab07.md).
+> Опис лабораторних 1–4 (з виводами консолі) — у [README_labs1-4.md](README_labs1-4.md), лабораторної 5 — у [README_lab05.md](README_lab05.md), 6 — у [README_lab06.md](README_lab06.md), 7 — у [README_lab07.md](README_lab07.md), 8 — у [README_lab08.md](README_lab08.md).
 
 ---
 
-## Лабораторна робота 8. async/await, скасування, доменні винятки, unit-тести Core
+## Лабораторна робота 9. Шляхи, JSON, конфігурація, Secrets
 
-**Мета**: реалізувати асинхронне виконання тривалих операцій введення-виведення, підтримати кооперативне скасування, розмежувати доменні й технічні помилки та покрити тестами ключову логіку `Core`.
+**Мета**: зробити застосунок кросплатформним — жодних абсолютних Windows-шляхів у коді, жодних паролів у Git; налаштування з `appsettings.json` з перевизначенням змінними середовища; експорт та імпорт усієї колекції у JSON.
 
-**Варіант (бібліотека)**: async-імпорт каталогу видань з JSON; `DomainException` «примірник уже видано»; тест на повернення невиданого примірника.
+**Варіант (бібліотека)**: колекція видань (isbn, title, author, year) з примірниками й видачами + ключ `Library:LoanDays` (строк видачі).
 
 ### Запуск
 
 | Команда | Що відбувається |
 | :------ | :-------------- |
-| `dotnet test` | Усі тести `tests/Core.Tests` (28 випадків) |
-| `dotnet test --collect:"XPlat Code Coverage"` | Те саме + звіт покриття Cobertura у `tests/Core.Tests/TestResults/…` (дод. 4) |
-| `dotnet run --project src/Cli -- --import-async` | Імпорт `data/catalog.json` (17 видань) у сховище в пам'яті |
-| `dotnet run --project src/Cli -- --import-async --file` | Те саме у `FileBookStore`; другий запуск — 0 записів (ідемпотентність) |
-| `dotnet run --project src/Cli -- --import-async data/catalog_bad.json` | Зіпсований запис 3 → «Дані відхилено: Запис 3: …» |
-| `dotnet run --project src/Cli -- --import-async --big` | Генерує 1 000 000 видань у `%TEMP%`, імпортує з прогресом; **Ctrl+C** → «Імпорт скасовано.» |
-| `dotnet run --project src/Cli -- --import-async --big --timeout 2` | Той самий файл із тайм-аутом 2 с (зв'язані токени, дод. 2) |
-| `… --import-async [шлях] --stream` | Потоковий імпорт через `IAsyncEnumerable<Book>` (дод. 1) |
-| `… --import-async --big 200000` | Розмір згенерованого файлу задається числом після `--big` |
-
-Як перевірити скасування: запустити `--import-async --big` і натиснути Ctrl+C, поки малюється прогрес (або коли з'явився рядок «Імпорт …»), — програма друкує «Імпорт скасовано.» і завершується з кодом 1 без стектрейсу. Без натискання: `--big --timeout 2` (файл генерується до старту тайм-ауту; на цій машині розбір і додавання мільйона записів тривають довше за 2 с). У тестах скасування перевіряють `ImportAsync_WhenAlreadyCancelled_Throws`, `ImportAsync_WhenCancelledDuringLoop_StopsAfterCurrentRecord` і два тести `TimeoutPolicy_*`.
-
----
+| `dotnet run --project src/Cli -- config` | Звідки прочитано налаштування: середовище, рівень журналу, шлях до даних, `Library:LoanDays`, наявність ApiKey |
+| `dotnet run --project src/Cli -- export` | Уся колекція (19 видань, 52 примірники, 21 видача) → файл даних із конфігурації |
+| `dotnet run --project src/Cli -- export my.json` | Те саме у вказаний файл (шлях з консолі — відносно поточного каталогу) |
+| `dotnet run --project src/Cli -- import [шлях]` | Читає колекцію назад (за замовчуванням — файл даних), друкує підсумки |
+| `dotnet run --project src/Cli -- report-all --file` | Звіти тижня 7 над `FileBookStore`, що лежить у тому самому файлі даних |
+| `dotnet run --project src/Cli -- config --Library:LoanDays=30` | Аргумент командного рядка перекриває всі інші джерела |
+| `dotnet test` | 42 тести `tests/Core.Tests` (28 тижня 8 + 14 нових у `StorageConfigTests`) |
 
 ### 1. Структура після лабораторної
 
-```text
-src/Core/
-├── DomainException.cs              # НОВЕ: порушення правила бібліотеки
-├── StorageException.cs             # НОВЕ: технічна помилка джерела (обгортає JsonException)
-├── Abstractions/ICatalogImporter.cs  # НОВЕ: асинхронний контракт LoadAsync(path, ct)
-├── Storage/JsonCatalogImporter.cs  # НОВЕ: FileStream(useAsync) + DeserializeAsync; StreamAsync (дод. 1)
-├── Services/LendingService.cs      # ЗМІНЕНО: ImportAsync(importer, path, [progress], ct), ImportAsync(IAsyncEnumerable)
-├── Services/TimeoutPolicy.cs       # НОВЕ: зв'язані токени користувач + тайм-аут (дод. 2)
-├── Domain/BookCopy.cs, Loan.cs     # ЗМІНЕНО: InvalidOperationException → DomainException
-└── Import/EntityImport.cs          # ЗМІНЕНО: перехоплює DomainException замість InvalidOperationException
-src/Cli/
-├── Program.cs                      # ЗМІНЕНО: --import-async: top-level await, Ctrl+C, catch за типами
-├── AsyncImport.cs                  # НОВЕ: розбір ключів, ConsoleProgress (дод. 3), генератор великого файлу
-└── EventsDemo.cs, ServiceDemo.cs, SinkDemo.cs  # ЗМІНЕНО: catch DomainException
-tests/Core.Tests/                   # НОВЕ: xUnit, посилається лише на src/Core
-├── LendingServiceTests.cs          # інваріанти, DomainException vs ArgumentException, подія
-├── ReportServiceTests.cs           # звіти тижня 7: [Theory], топ-N, агрегати
-├── ImportTests.cs                  # скасування, ідемпотентність, тимчасові файли, тайм-аут
-├── TestData.cs                     # фіксований фонд із 4 видань / 9 примірників (не SampleData)
-└── TestDoubles.cs                  # FakeImporter, NeverEndingImporter, CallbackProgress
-data/catalog.json, catalog_bad.json # НОВЕ: 17 видань; 5 видань із роком 2099 у записі 3
+```
+CrossApp/
+├── samples/                      ← вхідні файли лаб 3–8 (раніше data/); копіюються в bin/…/samples
+├── src/
+│   ├── Core/                     ← без пакетів конфігурації: домен не знає про JSON-файли налаштувань і user-secrets
+│   │   ├── Configuration/AppOptions.cs   ← AppOptions, StorageOptions (+ResolveFullPath), LoggingOptions, LibraryOptions
+│   │   ├── Storage/LibraryJson.cs        ← формат файлу колекції: camelCase, кирилиця без \uXXXX, .tmp + File.Move
+│   │   ├── Storage/FileBookStore.cs      ← шлях ззовні, читання/запис через LibraryJson
+│   │   └── Domain/Loan.cs, Dto/LoanDto.cs ← строк видачі LoanDays зберігається в кожній видачі
+│   └── Cli/
+│       ├── appsettings.json              ← у git, без секретів (профіль Production)
+│       ├── appsettings.Development.json  ← детальніший журнал, дані поруч зі збіркою
+│       ├── AppSettings.cs                ← ConfigurationBuilder, CROSSAPP_DATA_PATH, ConsoleLog
+│       ├── CollectionCommands.cs         ← config / export / import
+│       └── Cli.csproj                    ← пакети Microsoft.Extensions.Configuration.*, <UserSecretsId>
+├── tests/Core.Tests/StorageConfigTests.cs
+└── data/                                 ← не існує в git: створюється програмою, ігнорується (.gitignore)
 ```
 
-Проєкт тестів створено командами з кроку 1 (`dotnet new xunit -n Core.Tests -o tests/Core.Tests -f net10.0`, `dotnet sln add …`, `dotnet add tests/Core.Tests reference src/Core/Core.csproj`); `Core.Tests.csproj` має єдиний `ProjectReference` — на `Core`.
+### 2. Профілі Development і Production
 
-### 2. Які операції стали асинхронними і чому
+Профіль обирає змінна `CROSSAPP_ENVIRONMENT` (без неї — `Development`). `appsettings.json` задає Production-значення, `appsettings.{Environment}.json` перекриває лише те, що відрізняється.
 
-**Асинхронні** — лише ті, де потік справді чекав би на ввід-вивід:
+| | Development (за замовчуванням) | Production (`CROSSAPP_ENVIRONMENT=Production`) |
+| :-- | :-- | :-- |
+| Журнал `Logging:MinimumLevel` | `Debug` — друкує cwd, каталог застосунку, ланцюжок джерел | `Warning` — лише попередження |
+| Дані `Storage:Root` + `DataPath` | `App` + `data` → `src/Cli/bin/Debug/net10.0/data/library.json` | `LocalAppData` + `CrossApp` → `%LOCALAPPDATA%\CrossApp\library.json` (Linux: `~/.local/share/CrossApp/library.json`) |
+| `Library:LoanDays` | 21 | 14 |
+| user-secrets | підключені (`secrets.json` у профілі користувача) | не підключені: секрет лише зі змінної середовища |
 
-- `JsonCatalogImporter.LoadAsync` / `StreamAsync` — читання файлу каталогу. Файл може бути великим (мільйон записів — ~100 МБ), а згодом на місці файлу буде HTTP (тиждень 13). `FileStream(..., useAsync: true)` + `JsonSerializer.DeserializeAsync` дають справжній overlapped I/O: поки диск віддає байти, потік не зайнятий.
-- `LendingService.ImportAsync` — асинхронний, бо чекає `LoadAsync` («асинхронність на всіх рівнях»). Сам цикл додавання синхронний (робота з пам'яттю), але між записами перевіряє токен.
-- `Program.cs` — top-level `await`, тож `Main` став `async Task<int>`; `.Result`/`.Wait()` немає.
-- `BigCatalog.WriteAsync` (Cli) — запис згенерованого файлу через `SerializeAsync`.
+### 3. Таблиця ключів
 
-**Лишились синхронними**: доменні операції (`AddBook`, `IssueCopy`, `ReturnCopy` …) і `IBookStore` — вони працюють зі словником у пам'яті, чекати нічого; обгортка `Task` дала б лише накладні витрати. `ReportService` — чисті обчислення над колекціями. `FileBookStore` поки пише синхронно (`File.WriteAllText` після кожної зміни): контракт `IBookStore` асинхронним стане разом з EF Core на тижні 11 (`SaveChangesAsync`), щоб не міняти його двічі. Старі імпортери тижнів 2–4 (`BookCsvImporter`, `BookJsonImporter`) не чіпав — на них тримаються режими `--import`/`--domain`.
+| Ключ у JSON | Змінна середовища | За замовчуванням | Призначення |
+| :---------- | :---------------- | :--------------- | :---------- |
+| `EnvironmentName` | `CROSSAPP_EnvironmentName` | `Production` | Назва профілю в самому файлі (для перевірки, який файл підхопився) |
+| `Logging:MinimumLevel` | `CROSSAPP_Logging__MinimumLevel` | `Warning` / `Debug` | `Debug`, `Information`, `Warning`, `Error` |
+| `Storage:Root` | `CROSSAPP_Storage__Root` | `LocalAppData` / `App` | Базовий каталог для відносного `DataPath` |
+| `Storage:DataPath` | `CROSSAPP_Storage__DataPath` або **`CROSSAPP_DATA_PATH`** | `CrossApp` / `data` | Каталог даних; абсолютний шлях використовується як є |
+| `Storage:FileName` | `CROSSAPP_Storage__FileName` | `library.json` | Лише ім'я файлу, без каталогів |
+| `Library:LoanDays` | `CROSSAPP_Library__LoanDays` | 14 / 21 | Строк нових видач, 1..365 днів |
+| `Integration:ApiKey` | `CROSSAPP_Integration__ApiKey` | — (немає у файлах) | Секрет: user-secrets або змінна; друкується лише «присутній, довжина N» |
+| — | `CROSSAPP_ENVIRONMENT` | `Development` | Який `appsettings.{Environment}.json` додати |
 
-### 3. Фрагменти коду
+Порядок джерел (кожне наступне перекриває попередні): `appsettings.json` → `appsettings.{Environment}.json` → user-secrets (лише Development) → змінні `CROSSAPP_*` → аргументи `--Ключ=значення` → `CROSSAPP_DATA_PATH` поверх `Storage:DataPath`.
 
-`LoadAsync` ([JsonCatalogImporter.cs](src/Core/Storage/JsonCatalogImporter.cs)):
+### 4. Приклади змінних середовища
+
+PowerShell (діє до закриття вікна):
+
+```powershell
+$env:CROSSAPP_DATA_PATH = "$env:TEMP\crossapp-data"
+$env:CROSSAPP_Library__LoanDays = "30"
+$env:CROSSAPP_ENVIRONMENT = "Production"
+$env:CROSSAPP_Integration__ApiKey = "from-env"
+dotnet run --project src/Cli -- export
+Remove-Item Env:CROSSAPP_DATA_PATH, Env:CROSSAPP_Library__LoanDays, Env:CROSSAPP_ENVIRONMENT, Env:CROSSAPP_Integration__ApiKey
+```
+
+bash (змінна лише для однієї команди):
+
+```bash
+CROSSAPP_DATA_PATH=/tmp/data dotnet run --project src/Cli -- export
+CROSSAPP_ENVIRONMENT=Production CROSSAPP_Integration__ApiKey=from-env dotnet run --project src/Cli -- config
+CROSSAPP_Storage__FileName=backup.json dotnet run --project src/Cli -- export
+```
+
+### 5. Секрет `Integration:ApiKey`
+
+```bash
+dotnet user-secrets init --project src/Cli                               # один раз: <UserSecretsId> у Cli.csproj (комітиться)
+dotnet user-secrets set "Integration:ApiKey" "local-dev-key" --project src/Cli
+dotnet user-secrets list --project src/Cli                               # Integration:ApiKey = local-dev-key
+```
+
+Значення лежить поза репозиторієм: `%APPDATA%\Microsoft\UserSecrets\f2f9bd1f-6226-437a-94a8-f58165074554\secrets.json` (Windows) або `~/.microsoft/usersecrets/f2f9bd1f-6226-437a-94a8-f58165074554/secrets.json` (Linux/macOS). `git status` після `set` чистий, `git grep local-dev-key` нічого не знаходить. Файл не шифрується — це зручність розробника, а не сховище для продакшену; там секрет приходить змінною `CROSSAPP_Integration__ApiKey` або зі спеціалізованого сховища (Key Vault тощо).
+
+### 6. Фрагменти коду
+
+**Шлях без літералів** (`src/Core/Configuration/AppOptions.cs`):
 
 ```csharp
-ct.ThrowIfCancellationRequested(); // уже скасовано — файл навіть не відкриваємо
-await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
-dtos = await JsonSerializer.DeserializeAsync<List<BookDto>>(stream, Options, ct)
-    ?? throw new DomainException($"Файл {Path.GetFileName(path)} не містить списку.");
-for (var i = 0; i < dtos.Count; i++)
+public string ResolveFullPath(string baseDir)
 {
-    ct.ThrowIfCancellationRequested();
-    result.Add(ToBook(dtos[i], i + 1)); // ArgumentException → DomainException($"Запис {i + 1}: …", ex)
+    if (string.IsNullOrWhiteSpace(FileName) || Path.GetFileName(FileName) != FileName)
+        throw new ArgumentException($"Storage:FileName має бути іменем файлу без каталогів, а не '{FileName}'.");
+
+    var root = Path.IsPathRooted(DataPath) ? DataPath : Path.Combine(baseDir, DataPath);
+    Directory.CreateDirectory(root);
+    return Path.GetFullPath(Path.Combine(root, FileName));
 }
 ```
 
-Обробка скасування ([Program.cs](src/Cli/Program.cs), `ImportCatalogAsync`):
+`Path.Combine` бере роздільник поточної ОС (`\` у Windows, `/` у Linux) і не дублює його, якщо частина вже закінчується роздільником; конкатенація `baseDir + "\\" + "data"` на Linux дала б файл з іменем `net10.0\data` у поточному каталозі.
+
+**Збирання конфігурації** (`src/Cli/AppSettings.cs`):
 
 ```csharp
-using var cts = new CancellationTokenSource();
-Console.CancelKeyPress += onCtrlC;                 // (_, e) => { e.Cancel = true; cts.Cancel(); }
-try { int added = await Import(cts.Token); Say($"Імпортовано записів: {added}"); }
-catch (OperationCanceledException) { Say("Імпорт скасовано."); }        // першим: це не збій
-catch (TimeoutException ex) { Say($"Імпорт скасовано: {ex.Message}"); }
-catch (DomainException ex) { Say($"Дані відхилено: {ex.Message}"); }
-catch (StorageException ex) { Say($"Файл пошкоджено: {ex.Message}"); }
-finally { Console.CancelKeyPress -= onCtrlC; }
+var builder = new ConfigurationBuilder()
+    .SetBasePath(AppContext.BaseDirectory) // не cwd: файли лежать поруч зі збіркою
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+    .AddJsonFile($"appsettings.{envName}.json", optional: true, reloadOnChange: false);
+if (envName == "Development")
+    builder.AddUserSecrets(Assembly.GetExecutingAssembly(), optional: true);
+IConfiguration config = builder
+    .AddEnvironmentVariables(prefix: "CROSSAPP_")
+    .AddCommandLine(ConfigArguments(args))   // лише --Ключ=значення
+    .Build();
+AppOptions options = config.Get<AppOptions>() ?? new AppOptions();
 ```
 
-Ланцюжок токена: `cts.Token` (Cli) → `TimeoutPolicy.RunAsync` (зв'язаний токен, якщо задано `--timeout`) → `LendingService.ImportAsync(importer, path, progress, ct)` → `importer.LoadAsync(path, ct)` → `DeserializeAsync(stream, Options, ct)`; плюс `ct.ThrowIfCancellationRequested()` у циклі `LoadAsync` і в циклі `ImportAsync`. Для потоку: `ImportAsync(books, ct)` → `books.WithCancellation(ct)` → параметр `[EnumeratorCancellation] ct` у `StreamAsync` → `DeserializeAsyncEnumerable(…, ct)`.
+**Атомарний запис** (`src/Core/Storage/LibraryJson.cs`):
 
-### 4. Таблиця тестів
-
-| Тест | Що перевіряє | Очікуваний результат |
-| :--- | :----------- | :------------------- |
-| `IssueCopy_WhenCopyAlreadyIssued_ThrowsDomainException_AndKeepsState` | Варіант: «примірник уже видано» | `DomainException` з «вже виданий»; у сховищі одна видача, за R-2 — нуль |
-| `ReturnCopy_WhenLoanAlreadyClosed_ThrowsDomainException_AndKeepsState` | Варіант: повернення невиданого примірника через сервіс | `DomainException`; дата першого повернення не змінилась, примірник на полиці |
-| `Return_OfCopyOnShelf_ThrowsDomainException` | Те саме правило на рівні `BookCopy` | `DomainException`; `IsIssued == false` |
-| `AddBook_WithYearOutOfRange_ThrowsArgumentOutOfRange_AndAddsNothing` (×2: 1449, 3000) | Поганий аргумент ≠ доменна помилка | `ArgumentOutOfRangeException`; сховище порожнє |
-| `AddBook_WithIsbnAlreadyInCatalog_ThrowsDomainException` (×2: з дефісами і без) | Унікальність ISBN у каталозі | `DomainException`; у сховищі одне видання |
-| `IssueCopy_OverReaderLimit_ThrowsDomainException` | Ліміт 5 незакритих видач | `DomainException`; активних видач рівно 5 |
-| `AddBook_RaisesChangedExactlyOnce` | Подія тижня 6 | Рівно одна подія `BookAdded` з id нової книги |
-| `IssueCopy_WhenRejected_RaisesNoEvent` | Подія лише після успішної зміни | Список подій порожній |
-| `LowStock_CountsOnlyBelowThreshold` (×4: 0→0, 1→2, 4→3, 5→4) | Звіт на кількох наборах (`[Theory]`) | Кількість рядків дорівнює очікуваній |
-| `TopBooks_IsDeterministic` | Топ-2 за кількістю примірників | `["B-BIG", "B-MID"]` |
-| `TopBooks_OnTie_OrdersByBookId_RegardlessOfSourceOrder` | Другий ключ `ThenBy` | `["B-1", "B-2"]` і для прямого, і для оберненого джерела |
-| `Totals_OnTestData_ComputesAggregates` | Агрегати | `(4, 9, 2.25, 5)` |
-| `Totals_OnEmptySource_ReturnsZeros` | Порожнє джерело | `(0, 0, 0, 0)` без винятку |
-| `ImportAsync_WhenAlreadyCancelled_Throws` | Заздалегідь скасований токен | `OperationCanceledException` (файл `any.json` навіть не відкривається) |
-| `ImportAsync_WhenCancelledDuringLoop_StopsAfterCurrentRecord` | `ThrowIfCancellationRequested` у циклі | `OperationCanceledException`; додано рівно 1 з 4 |
-| `ImportAsync_RaisesEventPerAddedBook_AndIsIdempotent` | Подія на кожен запис + ідемпотентність | Перший імпорт 4, другий 0; подій `BookAdded` — 4 |
-| `ImportAsync_SkipsBookWithIsbnAlreadyInCatalog` | Інший id, той самий ISBN | Додано 0 |
-| `LoadAsync_FileWithInvalidRecord_ThrowsDomainException_WithRecordNumber` | Тимчасовий файл із роком 2099 у записі 2 | `DomainException` «Запис 2: …», `InnerException` — `ArgumentOutOfRangeException` |
-| `ImportAsync_FromFileWithInvalidRecord_AddsNothing` | Атомарність імпорту списком | `DomainException`; сховище порожнє |
-| `StreamImport_StopsAtInvalidRecord_KeepingEarlierOnes` | Потоковий імпорт (дод. 1) | `DomainException` «Запис 3: …»; два перші записи вже додано |
-| `LoadAsync_MalformedJson_ThrowsStorageException_KeepingJsonInner` | Технічна помилка не маскується під доменну | `StorageException`, `InnerException` — `JsonException` |
-| `TimeoutPolicy_WhenTimeoutElapses_ThrowsTimeoutException` | Зв'язані токени: спрацював тайм-аут (дод. 2) | `TimeoutException`; токен користувача не скасовано |
-| `TimeoutPolicy_WhenUserCancels_ThrowsOperationCanceled` | …а тут — користувач | `OperationCanceledException`, не `TimeoutException` |
-
-Разом 22 тестові методи, 28 випадків (`[Theory]` дає окремий випадок на кожен `[InlineData]`). Файлова система — лише в чотирьох тестах `ImportTests` з тимчасовим файлом `core-tests-<guid>.json` у `Path.GetTempPath()`, який видаляється у `finally`.
-
-### 5. Вивід
-
-`dotnet test` (двічі поспіль — однаковий результат):
-
-```text
-Test run for ...\tests\Core.Tests\bin\Debug\net10.0\Core.Tests.dll (.NETCoreApp,Version=v10.0)
-A total of 1 test files matched the specified pattern.
-Passed!  - Failed:     0, Passed:    28, Skipped:     0, Total:    28, Duration: 190 ms - Core.Tests.dll (net10.0)
-Passed!  - Failed:     0, Passed:    28, Skipped:     0, Total:    28, Duration: 168 ms - Core.Tests.dll (net10.0)
+```csharp
+string tmp = fullPath + ".tmp";
+File.WriteAllText(tmp, JsonSerializer.Serialize(dtos, Options));
+File.Move(tmp, fullPath, overwrite: true);
 ```
 
-`dotnet run --project src/Cli -- --import-async` (рядок прогресу перемальовується через `\r`, у терміналі видно останній стан):
+### 7. Вивід
 
-```text
-Сховище: InMemoryBookStore
-Імпорт data\catalog.json; Ctrl+C — скасувати
- Прогрес: 100% [####################]
-Імпортовано записів: 17
-Подій Changed: 17; видань у каталозі: 36
+Запуск з кореня solution і з `src/Cli` — той самий файл даних (база — `AppContext.BaseDirectory`, а не робочий каталог):
+
+```
+PS> dotnet run --project src/Cli -- export
+[debug] Середовище: Development (CROSSAPP_ENVIRONMENT не задано)
+[debug] Робочий каталог (Environment.CurrentDirectory): C:\Users\Admin\Downloads\CPP\Lab_1\CrossApp
+[debug] Каталог застосунку (AppContext.BaseDirectory): C:\Users\Admin\Downloads\CPP\Lab_1\CrossApp\src\Cli\bin\Debug\net10.0\
+[debug] Джерела: appsettings.json → appsettings.Development.json → secrets.json → EnvironmentVariables → CommandLine
+Файл даних : C:\Users\Admin\Downloads\CPP\Lab_1\CrossApp\src\Cli\bin\Debug\net10.0\data\library.json
+ApiKey: присутній, довжина 13
+Експортовано 92 записи (видань 19, примірників 52, видач 21).
+[debug] Тимчасовий файл library.json.tmp після File.Move: немає
+
+PS src\Cli> dotnet run -- export
+[debug] Робочий каталог (Environment.CurrentDirectory): C:\Users\Admin\Downloads\CPP\Lab_1\CrossApp\src\Cli
+[debug] Каталог застосунку (AppContext.BaseDirectory): C:\Users\Admin\Downloads\CPP\Lab_1\CrossApp\src\Cli\bin\Debug\net10.0\
+Файл даних : C:\Users\Admin\Downloads\CPP\Lab_1\CrossApp\src\Cli\bin\Debug\net10.0\data\library.json
 ```
 
-`--import-async --file`, перший і другий запуск (ідемпотентність):
+До і після `CROSSAPP_DATA_PATH`:
 
-```text
-Сховище: FileBookStore
-Файл: ...\src\Cli\bin\Debug\net10.0\data\library.json (є з попереднього запуску)
-Імпорт data\catalog.json; Ctrl+C — скасувати
- Прогрес: 100% [####################]
-Імпортовано записів: 17
-Подій Changed: 17; видань у каталозі: 18
-...
-Імпортовано записів: 0
-Подій Changed: 0; видань у каталозі: 18
+```
+PS> $env:CROSSAPP_DATA_PATH = "$env:TEMP\crossapp-data"; dotnet run --project src/Cli -- export
+Файл даних : C:\Users\Admin\AppData\Local\Temp\crossapp-data\library.json
+ApiKey: присутній, довжина 13
+Експортовано 92 записи (видань 19, примірників 52, видач 21).
+
+PS> Remove-Item Env:CROSSAPP_DATA_PATH; dotnet run --project src/Cli -- import
+Файл даних : C:\Users\Admin\Downloads\CPP\Lab_1\CrossApp\src\Cli\bin\Debug\net10.0\data\library.json
+ApiKey: присутній, довжина 13
+Імпортовано 92 записи.
+ видань 19, примірників 52, видач 21; прострочено на сьогодні: 14
+ перше видання: B-001 [978-0-201-61622-4] «Прагматичний програміст», 1999 — Ендрю Гант
 ```
 
-Скасування тайм-аутом — `--import-async --big --timeout 2`:
+Production і секрет зі змінної середовища:
 
-```text
-Сховище: InMemoryBookStore
-Генерую 1,000,000 видань у C:\Users\Admin\AppData\Local\Temp\crossapp-catalog-1000000.json …
-Імпорт C:\Users\Admin\AppData\Local\Temp\crossapp-catalog-1000000.json, тайм-аут 2 с; Ctrl+C — скасувати
-Імпорт скасовано: Операцію перервано тайм-аутом 2 с.
+```
+PS> $env:CROSSAPP_ENVIRONMENT = "Production"; dotnet run --project src/Cli -- config
+Файл даних : C:\Users\Admin\AppData\Local\CrossApp\library.json
+ApiKey: не заданий
+Середовище      : Production (EnvironmentName з файлу: Production)
+Рівень журналу  : Warning
+Storage:Root    : LocalAppData → C:\Users\Admin\AppData\Local
+Storage:DataPath: CrossApp
+Storage:FileName: library.json
+Library:LoanDays: 14
+
+PS> $env:CROSSAPP_Integration__ApiKey = "from-env"; dotnet run --project src/Cli -- export
+Файл даних : C:\Users\Admin\AppData\Local\CrossApp\library.json
+ApiKey: присутній, довжина 8
+Експортовано 92 записи (видань 19, примірників 52, видач 21).
 ```
 
-Скасування Ctrl+C (`--import-async --big`, натиснути під час імпорту): гілка `catch (OperationCanceledException)` друкує рядок `Імпорт скасовано.` — без стектрейсу, код виходу 1. Тимчасовий файл видаляється у `finally` в обох випадках.
+Фрагмент `data/library.json` (кирилиця як є, camelCase, `kind` — тип запису):
 
-Зіпсовані й відсутні файли:
-
-```text
-> --import-async data/catalog_bad.json
-Дані відхилено: Запис 3: Рік видання має бути в межах 1450..2026 (Parameter 'year')
-
-> --import-async data/catalog_bad.json --stream
-Дані відхилено: Запис 3: Рік видання має бути в межах 1450..2026 (Parameter 'year')
-
-> --import-async data/sample.csv
-Файл пошкоджено: Файл sample.csv не є коректним JSON-списком видань: 'i' is an invalid start of a value. Path: $ | LineNumber: 0 | BytePositionInLine: 0.
-
-> --import-async data/nope.json
-Файл не знайдено: data/nope.json
+```json
+[
+  { "kind": "book", "id": "B-001", "isbn": "978-0-201-61622-4", "title": "Прагматичний програміст", "year": 1999, "author": "Ендрю Гант" },
+  { "kind": "copy", "id": "C-001", "isbn": "978-0-201-61622-4", "isIssued": true },
+  { "kind": "loan", "id": "L-001", "copyId": "C-001", "readerId": "R-001", "issuedOn": "2026-09-01", "returnedOn": null, "status": "Open", "loanDays": 14 }
+]
 ```
 
-### 6. DomainException і ArgumentException у проєкті
+Помилки — повідомлення без stack trace:
 
-`ArgumentException` (і `ArgumentOutOfRangeException`, `ArgumentNullException`) означає, що *викликач* передав методу значення, яке поза його контрактом, незалежно від стану бібліотеки: порожній ISBN або ISBN неправильної довжини (`IsbnRules.Normalize`), рік видання 2099 (`Book.Create`), порожній `readerId` (`IssueCopy`), дата повернення раніше дати видачі (`Loan.Close`). Такий виклик неправильний за будь-якого стану бібліотеки. `DomainException` означає, що аргументи коректні, але операцію забороняє *поточний стан* бібліотеки: «Примірник C-001 вже виданий, повторна видача неможлива» (`BookCopy.Issue`), «Примірник … і так на полиці, повернути його неможливо» (`BookCopy.Return`), «Видача … вже закрита» (`Loan`), дубль ISBN у каталозі, ліміт 5 видач читача, вилучення видання з примірниками, «Немає примірника з id=…» (`LendingService`). Той самий виклик `IssueCopy("C-001", "R-2", …)` учора був би успішним. Межа проходить і через імпорт: у `Book.FromDto` рік 2099 — це `ArgumentOutOfRangeException`, але для `JsonCatalogImporter` це вже погані дані каталогу, тож він загортає їх у `DomainException("Запис 3: …", ex)`, а початковий виняток лишає в `InnerException`. Третя категорія — технічні збої (`FileNotFoundException`, `JsonException` → `StorageException`, `InvalidDataException` у `FileBookStore`, `InvalidOperationException` сховища на дубль id): їх не видаю за доменні, бо з правилами бібліотеки вони не пов'язані, і реакція на них інша («перевірте файл», а не «примірник уже видано»).
+```
+PS> dotnet run --project src/Cli -- import samples/catalog_bad.json
+Файл пошкоджено: Файл …\samples\catalog_bad.json не є файлом колекції: кожен запис має починатися з "kind" (book | copy | loan).
 
-### 7. Додаткові завдання
+PS> dotnet run --project src/Cli -- import broken.json          # зайва кома
+Файл пошкоджено: Файл …\broken.json не є коректним JSON колекції (рядок 1, позиція 92): ',' is an invalid start of a property name. …
 
-1. **`IAsyncEnumerable<Book>` + `[EnumeratorCancellation]`.** `JsonCatalogImporter.StreamAsync` віддає видання по одному з `JsonSerializer.DeserializeAsyncEnumerable`; `LendingService.ImportAsync(IAsyncEnumerable<Book>, ct)` перебирає їх через `await foreach (… in books.WithCancellation(ct))`, і цей токен через атрибут потрапляє в параметр `StreamAsync`. Оскільки `yield return` не можна писати в `try` з `catch`, `MoveNextAsync` викликається вручну в маленькому `try`, щоб загорнути `JsonException`. Ціна потоковості — неатомарність: тест `StreamImport_StopsAtInvalidRecord_KeepingEarlierOnes` фіксує, що записи до поганого вже в каталозі, а `ImportAsync_FromFileWithInvalidRecord_AddsNothing` — що варіант зі списком не додає нічого. Запуск: `--import-async --stream`.
-2. **Зв'язані токени.** `TimeoutPolicy.RunAsync` створює `CancellationTokenSource(timeout)` і `CreateLinkedTokenSource(userToken, timeoutToken)`; якщо скасування спричинив тайм-аут, а не користувач (`timeoutSource.IsCancellationRequested && !userToken.IsCancellationRequested`), кидає `TimeoutException` з `OperationCanceledException` в `InnerException`. Тести `TimeoutPolicy_WhenTimeoutElapses_ThrowsTimeoutException` і `TimeoutPolicy_WhenUserCancels_ThrowsOperationCanceled` на `NeverEndingImporter` (`Task.Delay(Infinite, ct)`) доводять, яке з джерел спрацювало. Запуск: `--timeout 2`.
-3. **`IProgress<int>`.** `ImportAsync(importer, path, progress, ct)` повідомляє відсоток опрацьованих записів лише тоді, коли він змінився (на мільйоні записів — 101 виклик, а не мільйон). Підписник `ConsoleProgress` у Cli малює `Прогрес:  42% [########            ]` в одному рядку через `\r`. Це власний синхронний клас, а не `Progress<T>`: той у консолі викликає обробник через пул потоків, і «Імпортовано записів» могло б надрукуватися раніше за останні відсотки. Тест `ImportAsync_WhenCancelledDuringLoop_…` використовує той самий прийом (`CallbackProgress`), щоб скасувати імпорт після першого запису.
-4. **Покриття** (`dotnet test --collect:"XPlat Code Coverage"`, coverlet із шаблону xunit): усього по `Core` — **37,6 % рядків, 20,3 % гілок**. Новий код тижня 8 покритий добре: `JsonCatalogImporter.LoadAsync` 89 %, `StreamAsync` 78 %, `TimeoutPolicy` 91 %, `LendingService.ImportAsync` 82–100 %, `DomainException`/`StorageException` 100 %; `BookCopy` 91 %, `Book` 85 %, `LendingService` загалом 75 %. Непокриті (0 %) — імпортери CSV/JSON тижнів 2–4, `FileBookStore`, `CachingBookStore`, `SampleData`, `EnvironmentInfo`, `ReportBenchmarks`, а також частина `ReportService` (40 %: `Overdue`, `ByDecade`, `Join`-звіти) і `Loan.FromDto` (52 %). Поки це прийнятно: CSV-імпортери — код лаб 2–4, який перевірено вручну виводами з README_labs1-4 і який не входить у ланцюжок тижнів 10–11; `FileBookStore` — інфраструктура, яку на тижні 11 замінить EF Core (тестуватиметься інтеграційно, а не модульно); `SampleData`/`EnvironmentInfo`/`ReportBenchmarks` — демо-дані й діагностика без бізнес-правил. Наступні кандидати на тести — `ReportService.Overdue` і `Loan.FromDto` (правила узгодженості статусу й дат).
+PS> $env:CROSSAPP_Logging__MinimumLevel = "Loud"; dotnet run --project src/Cli -- config
+Помилка конфігурації: Failed to convert configuration value 'Loud' at 'Logging:MinimumLevel' to type 'Core.Configuration.LogLevel'.
+ причина: Loud is not a valid value for LogLevel.
+```
 
 ### 8. Самоперевірка
 
-1. `grep -rnE "\.Result\b|\.Wait\(\)|async void|Task\.Run" src tests --include=*.cs` — єдиний збіг — коментар у `JsonCatalogImporter.cs` («без Task.Run навколо File.ReadAllText»). Обробник `Console.CancelKeyPress` — звичайна синхронна лямбда; тести — `async Task`.
-2. `dotnet test` двічі поспіль — 28/28 обидва рази; кожен тест створює власне `InMemoryBookStore`, `TestData` щоразу повертає нові об'єкти, статичного змінного стану немає.
-3. Жоден тест не читає `data/`; тимчасові файли мають унікальні імена й видаляються у `finally` (`WithTempFileAsync`).
-4. Кожен тест має щонайменше один `Assert` на конкретний тип (`Assert.Throws<DomainException>`, а не `<Exception>`); `ThrowsAnyAsync<OperationCanceledException>` — свідомо, бо скасування може прийти як `TaskCanceledException`.
-5. Токен передано в кожен `await`: `LoadAsync(path, ct)`, `DeserializeAsync(…, ct)`, `DeserializeAsyncEnumerable(…, ct)`, `WithCancellation(ct)`, `SerializeAsync(…, ct)`, `Task.Delay(…, ct)`; у циклах — `ThrowIfCancellationRequested`.
+| Питання | Результат |
+| :------ | :-------- |
+| Пошук `"C:\"`, `"/home/"`, `"\\"` у `src` | порожньо (`git grep -F "C:\" -- src`) |
+| Запуск з двох робочих каталогів | той самий `…\bin\Debug\net10.0\data\library.json` |
+| Видалили `data/` | `ResolveFullPath` створює каталог заново, експорт без винятку |
+| Зіпсований JSON | «Файл пошкоджено: … (рядок 1, позиція 92) …», код виходу 1 |
+| `git status` після `user-secrets set`; кирилиця | чистий; у файлі «Прагматичний програміст», жодного `\u04…` |
 
-`dotnet build` — `0 Warning(s)`, `0 Error(s)`; режими `--events`, `--service`, `--sinks`, `--import`, `--domain`, `--info`, `report-all [--file|--cache|--empty]` працюють, як раніше.
+### 9. Definition of Done (Лабораторна робота 9)
 
-### 9. Definition of Done (Лабораторна робота 8)
-
-- [x] Проєкт `tests/Core.Tests` у solution, посилання лише на `Core`.
-- [x] Асинхронне читання через `FileStream(useAsync: true)` + `DeserializeAsync`, без `Task.Run`.
-- [x] `CancellationToken` у сигнатурі, перевіряється в циклі і передається далі (розділ 3).
-- [x] Cli реагує на Ctrl+C і тайм-аут повідомленням, а не стектрейсом.
-- [x] Власний `DomainException` для бізнес-помилок (`BookCopy`, `Loan`, `LendingService`).
-- [x] ≥ 5 тестів (22 методи / 28 випадків): інваріанти, подія, звіт, скасування; `dotnet test` зелений.
-- [x] Немає `async void`, `.Result`, `.Wait()`.
-- [x] README: як запустити тести і як перевірити скасування. Коміт `lab08` — після перевірки.
-- [x] Виконано всі 4 додаткові завдання.
+1. Експорт і імпорт колекції в JSON — команди `export` / `import`, `LibraryJson` (тести `LibraryJson_RoundTrip_…`).
+2. Немає абсолютних шляхів і паролів у коді — пошук порожній; секрет лише в user-secrets.
+3. `appsettings.json` у репозиторії, без секретів — `src/Cli/appsettings.json`.
+4. `CROSSAPP_DATA_PATH` перекриває шлях із файлу — розділ 7.
+5. Секрет читається з user-secrets або env; запуск з довільного cwd працює — розділи 5 і 7.
+6. `dotnet build` і `dotnet test` зелені (42/42); коміт `lab09`.
 
 ### 10. Відповіді на питання на захисті
 
-1. **Що насправді робить await? Чи створює він потік?** Не створює. `await` перевіряє, чи задача вже завершена; якщо ні — реєструє решту методу як продовження (continuation) і повертає керування викликачу, а потік вільний для іншої роботи. Коли ОС повідомить про завершення вводу-виводу (порт завершення I/O), продовження виконається на потоці з пулу (у консолі контексту синхронізації немає). Під час читання файлу каталогу жоден потік не «сидить» і не чекає на диск.
-2. **Чому Task.Run навколо File.ReadAllText — не асинхронний ввід-вивід?** `File.ReadAllText` блокує потік на весь час читання; `Task.Run` лише переносить це блокування з поточного потоку на потік пулу. Зайнятий потік так і лишається, а на сервері (тиждень 10) це забирає потоки в обробки запитів. Справжній async — `FileStream(useAsync: true)`/`ReadAllTextAsync`: запит іде в ОС, потік звільняється.
-3. **Чим небезпечні .Result і .Wait() у консольному застосунку?** Вони блокують потік до завершення задачі (витрачаючи його даремно) і загортають виняток в `AggregateException`. У середовищах із контекстом синхронізації (WinForms/WPF, старий ASP.NET) — класичний deadlock: потік чекає задачу, а продовження задачі чекає цей самий потік. У консолі deadlock рідший, але звичка переходить у Blazor/Api. Тому — top-level `await`.
-4. **Чому async void заборонений і чому обробники подій — виняток?** `async void` не повертає `Task`: його не можна дочекатися, не можна дізнатися, коли він завершився, а виняток із нього летить у контекст синхронізації/пул і валить процес — `try/catch` у місці виклику його не бачить. Обробники подій мусять мати сигнатуру `void (object, EventArgs)`, тому там `async void` допустимий, але всередині слід ловити винятки самому. У моєму коді його немає зовсім: обробник `CancelKeyPress` синхронний (лише `cts.Cancel()`), тести — `async Task`.
-5. **OperationCanceledException — це помилка? Як обробляєте і чому окремим catch?** Ні, це очікуваний результат: користувач сам попросив зупинитися. Тому `catch (OperationCanceledException)` стоїть першим і друкує «Імпорт скасовано.», а не «помилку»; якби першим був `catch (Exception)`, скасування виглядало б як збій. У `Core` OCE ніде не ловиться і не загортається в `DomainException` — проходить наскрізь (`catch (ArgumentException)` у `ToBook` його не зачіпає).
-6. **Хто створює CancellationToken, а хто його перевіряє?** Створює і скасовує власник `CancellationTokenSource` — `Program.cs` (Ctrl+C), `TimeoutPolicy` (тайм-аут), тест (`CancelAsync`). Перевіряють операції, що його отримали: `LendingService.ImportAsync` і `JsonCatalogImporter` (`ThrowIfCancellationRequested` у циклах), а також BCL-методи, яким його передано (`DeserializeAsync`, `Task.Delay`). Сам токен може лише «слухати», скасувати через нього не можна.
-7. **Коли кидати DomainException, а коли ArgumentException?** Див. розділ 6. Коротко: `ArgumentException` — значення неправильне за будь-якого стану (`Book.Create(…, year: 2099)` → `ArgumentOutOfRangeException`); `DomainException` — значення правильне, але правило бібліотеки забороняє операцію зараз (`IssueCopy` виданого примірника → «Примірник … вже виданий»).
-8. **Навіщо зберігати inner exception при обгортанні JsonException?** У `JsonException` — точне місце помилки (`Path: $[3].year | LineNumber: 12 | BytePositionInLine: 18`) і стек серіалізатора. Без `InnerException` лишилося б «файл поганий» без жодної підказки, де саме; у лозі (тиждень 14) потрібен саме ланцюжок. Тест `LoadAsync_MalformedJson_…` перевіряє, що inner на місці.
-9. **Чому в тестах сховище в пам'яті, а не файлове?** Тест перевіряє правило сервісу, а не диск: `InMemoryBookStore` швидкий, не залежить від прав доступу, шляхів, стану файлу з попереднього запуску і від паралельних тестів. Кожен тест отримує свіже сховище — порядок запуску неважливий. Це те, заради чого на тижні 5 з'явився `IBookStore`. Файлове сховище — інфраструктура, її перевіряють інтеграційними тестами окремо.
-10. **Що дає [Theory] з [InlineData] порівняно з кількома [Fact]?** Одна логіка перевірки — багато наборів даних: `LowStock_CountsOnlyBelowThreshold` перевіряє межу 0/1/4/5 одним методом замість чотирьох копій. Кожен `[InlineData]` — окремий випадок у звіті (`threshold: 4, expected: 3`), тож видно, який саме набір упав; додати набір — один рядок.
-11. **Як перевірили тестом, що подія піднялася рівно один раз?** Підписав лямбду, яка додає `EventArgs` у `List<LibraryChangedEventArgs>`, виконав `AddBook` і викликав `Assert.Single(events)`: він падає і на 0, і на 2+ подіях, а заодно повертає елемент для перевірки `Kind == BookAdded` і `EntityId`. Тесту не потрібні ні консоль, ні диск: подія — це просто виклик делегата, а сховище — у пам'яті. Парний тест `IssueCopy_WhenRejected_RaisesNoEvent` перевіряє `Assert.Empty` після відмови.
+1. **`Environment.CurrentDirectory` vs `AppContext.BaseDirectory`** — перший залежить від того, звідки запустили процес (`dotnet run` з кореня чи з `src/Cli`, ярлик, служба), другий — каталог зі збіркою, сталий для цієї збірки.
+2. **Чому `Path.Combine`** — бере роздільник ОС, не подвоює його, а абсолютну другу частину повертає як є; `"\\"` у Linux — звичайний символ імені файлу.
+3. **`SpecialFolder.LocalApplicationData`** — для даних користувача, що мають пережити оновлення/перевстановлення програми (каталог збірки може бути лише для читання, як `Program Files`); тут — профіль Production.
+4. **Порядок джерел** — `appsettings.json` → `appsettings.{Env}.json` → user-secrets → змінні середовища → командний рядок; пізніше додане перекриває.
+5. **`Storage:DataPath` у змінній** — `Storage__DataPath`, з префіксом — `CROSSAPP_Storage__DataPath`.
+6. **Де user-secrets** — `%APPDATA%\Microsoft\UserSecrets\<id>\secrets.json` / `~/.microsoft/usersecrets/<id>/secrets.json`; відкритий текст на диску розробника, тому не для продакшену.
+7. **`PropertyNamingPolicy = CamelCase` при десеріалізації** — очікує в JSON `isbn`, а не `Isbn`; щоб старі файли теж читались, додано `PropertyNameCaseInsensitive = true`.
+8. **Кирилиця як `\u0426`** — типовий енкодер екранує все поза Basic Latin заради безпечного вбудовування в HTML; дані не губляться, а для читабельного файлу — `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`.
+9. **`.tmp` + `File.Move`** — запис іде в тимчасовий файл, а перейменування на тому самому томі атомарне: у разі збою посеред запису лишається попередній цілий файл.
 
 ### 11. Що змінилося в коді попередніх лабораторних
 
-- Бізнес-правила в `BookCopy`, `Loan`, `LendingService` кидають `DomainException` замість `InvalidOperationException`; тексти повідомлень не змінилися. Перевірки аргументів лишилися `ArgumentException`. `InvalidOperationException` лишився тільки у сховищ (дубль id).
-- `EventsDemo`, `ServiceDemo`, `SinkDemo`, `EntityImport` перехоплюють `DomainException` (`ServiceDemo` — ще й `InvalidOperationException` для демонстрації «дубль id у сховищі»).
-- Розділ лабораторної 7 перенесено в [README_lab07.md](README_lab07.md).
+- `data/` з вхідними файлами перейменовано на `samples/`; `data/` тепер лише runtime-каталог і в `.gitignore`. Зразки копіюються в `bin/…/samples`, тому `--domain`, `--import`, `--import-async` без шляху працюють з будь-якого каталогу.
+- `Loan.LoanPeriodDays` (константа) → `Loan.DefaultLoanDays` + властивість `LoanDays` у кожній видачі; `LendingService(store, sink, loanDays)` бере строк з `Library:LoanDays`. Старі файли без `loanDays` читаються зі строком 14.
+- `FileBookStore` пише camelCase через `LibraryJson` атомарно; пошкоджений файл дає `StorageException` з позицією помилки.

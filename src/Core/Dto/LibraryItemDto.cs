@@ -8,4 +8,4 @@ namespace Core.Dto;
 [JsonDerivedType(typeof(BookDto), "book")]
 [JsonDerivedType(typeof(BookCopyDto), "copy")]
 [JsonDerivedType(typeof(LoanDto), "loan")]
-public abstract record LibraryItemDto(string Id);
+public abstract record LibraryItemDto([property: JsonPropertyOrder(-1)] string Id); // id — першим після "kind"

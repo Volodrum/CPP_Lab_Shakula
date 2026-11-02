@@ -5,8 +5,10 @@ namespace Core.Domain;
 // Видача примірника читачу. Стан змінюється лише переходами Open → Lost → Closed.
 public sealed class Loan : ILibraryEntity
 {
-    // Строк користування примірником; дата повернення не зберігається, а обчислюється від дати видачі.
-    public const int LoanPeriodDays = 14;
+    // Строк за замовчуванням; дата повернення не зберігається, а обчислюється від дати видачі.
+    // З тижня 9 строк задає конфігурація (Library:LoanDays) і він фіксується у видачі в момент Open:
+    // зміна налаштування не пересуває дат уже виданих примірників.
+    public const int DefaultLoanDays = 14;
 
     public string Id { get; }
     public BookCopy Copy { get; }
@@ -14,12 +16,14 @@ public sealed class Loan : ILibraryEntity
     public DateOnly IssuedOn { get; }
     public DateOnly? ReturnedOn { get; private set; }
     public LoanStatus Status { get; private set; }
-    public DateOnly DueOn => IssuedOn.AddDays(LoanPeriodDays);
+    public int LoanDays { get; }
+    public DateOnly DueOn => IssuedOn.AddDays(LoanDays);
 
     // Втрачений примірник теж рахується за читачем, доки видачу не закрито.
     public bool IsActive => Status != LoanStatus.Closed;
 
-    private Loan(string id, BookCopy copy, string readerId, DateOnly issuedOn, DateOnly? returnedOn, LoanStatus status)
+    private Loan(string id, BookCopy copy, string readerId, DateOnly issuedOn, DateOnly? returnedOn, LoanStatus status,
+        int loanDays)
     {
         Id = id;
         Copy = copy;
@@ -27,16 +31,25 @@ public sealed class Loan : ILibraryEntity
         IssuedOn = issuedOn;
         ReturnedOn = returnedOn;
         Status = status;
+        LoanDays = loanDays;
     }
 
-    public static Loan Open(string id, BookCopy copy, string readerId, DateOnly issuedOn)
+    public static Loan Open(string id, BookCopy copy, string readerId, DateOnly issuedOn,
+        int loanDays = DefaultLoanDays)
     {
         ValidateArguments(id, copy, readerId, issuedOn);
+        EnsureLoanDays(loanDays);
 
         // Примірник сам відмовить, якщо вже виданий; об'єкт видачі тоді не створюється.
         copy.Issue();
 
-        return new Loan(id.Trim(), copy, readerId.Trim(), issuedOn, returnedOn: null, LoanStatus.Open);
+        return new Loan(id.Trim(), copy, readerId.Trim(), issuedOn, returnedOn: null, LoanStatus.Open, loanDays);
+    }
+
+    public static void EnsureLoanDays(int loanDays)
+    {
+        if (loanDays is < 1 or > 365)
+            throw new ArgumentOutOfRangeException(nameof(loanDays), loanDays, "Строк видачі має бути в межах 1..365 днів");
     }
 
     public void Close(DateOnly returnedOn)
@@ -90,13 +103,14 @@ public sealed class Loan : ILibraryEntity
                 $"Дата повернення {returnedOn:dd.MM.yyyy} не може бути раніше дати видачі {issuedOn:dd.MM.yyyy}");
     }
 
-    public LoanDto ToDto() => new(Id, Copy.Id, ReaderId, IssuedOn, ReturnedOn, Status.ToString());
+    public LoanDto ToDto() => new(Id, Copy.Id, ReaderId, IssuedOn, ReturnedOn, Status.ToString(), LoanDays);
 
     // Відновлення з файлу: ті самі перевірки аргументів + узгодженість статусу, дат і примірника.
     public static Loan FromDto(LoanDto dto, BookCopy copy)
     {
         ArgumentNullException.ThrowIfNull(dto);
         ValidateArguments(dto.Id, copy, dto.ReaderId, dto.IssuedOn);
+        EnsureLoanDays(dto.LoanDays);
 
         if (!string.Equals(copy.Id, dto.CopyId?.Trim(), StringComparison.Ordinal))
             throw new ArgumentException(
@@ -119,7 +133,7 @@ public sealed class Loan : ILibraryEntity
                     $"Видача {dto.Id} активна, але примірник {copy.Id} позначено як на полиці", nameof(copy));
         }
 
-        return new Loan(dto.Id.Trim(), copy, dto.ReaderId.Trim(), dto.IssuedOn, dto.ReturnedOn, status);
+        return new Loan(dto.Id.Trim(), copy, dto.ReaderId.Trim(), dto.IssuedOn, dto.ReturnedOn, status, dto.LoanDays);
     }
 
     public override string ToString()
