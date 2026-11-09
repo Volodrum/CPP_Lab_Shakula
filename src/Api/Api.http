@@ -1,0 +1,115 @@
+# Лабораторна 10: цикл create-read-update-delete над /api/books.
+# Запуск API: dotnet run --project src/Api   (порт 5080 з launchSettings.json)
+# Visual Studio 17.12+, Rider або VS Code REST Client: запити виконуються по черзі,
+# id створеного видання підставляється з відповіді POST ({{create.response.body.$.id}}).
+
+@baseUrl = http://localhost:5080
+@books = {{baseUrl}}/api/books
+
+### 0. Сервіс живий
+GET {{baseUrl}}/health
+
+### 1. Список: перша сторінка (19 стартових видань)
+GET {{books}}
+
+### 2. Варіант «Бібліотека»: фільтр автора + пагінація → { items, total, page, pageSize }
+GET {{books}}?author=Мартін&page=1&pageSize=2
+
+### 3. Пошук за назвою або ISBN
+GET {{books}}?search=design
+
+### 4. CREATE — 201 Created + Location
+# @name create
+POST {{books}}
+Content-Type: application/json
+
+{
+  "isbn": "978-617-12-3456-7",
+  "title": "Кобзар",
+  "author": "Тарас Шевченко",
+  "year": 1840,
+  "copies": 2
+}
+
+### 5. READ — 200 OK
+GET {{books}}/{{create.response.body.$.id}}
+
+### 6. UPDATE — 200 OK (той самий запит удруге дає той самий стан)
+PUT {{books}}/{{create.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "isbn": "978-617-12-3456-7",
+  "title": "Кобзар (перше видання)",
+  "author": "Тарас Шевченко",
+  "year": 1840,
+  "copies": 3
+}
+
+### 7. UPDATE з порожньою назвою — 400 ValidationProblem, errors.Title
+PUT {{books}}/{{create.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "isbn": "978-617-12-3456-7",
+  "title": "",
+  "author": "Тарас Шевченко",
+  "year": 1840,
+  "copies": 3
+}
+
+### 8. Повторний ISBN — 409 Conflict (DomainException → ApiExceptionHandler)
+POST {{books}}
+Content-Type: application/json
+
+{
+  "isbn": "9786171234567",
+  "title": "Кобзар, дубль",
+  "year": 1840,
+  "copies": 0
+}
+
+### 9. DELETE — 204 No Content
+DELETE {{books}}/{{create.response.body.$.id}}
+
+### 10. READ після DELETE — 404 Not Found
+GET {{books}}/{{create.response.body.$.id}}
+
+### --- Помилки ---
+
+### 11. Невалідні поля — 400, errors: Isbn, Year, Copies
+POST {{books}}
+Content-Type: application/json
+
+{
+  "isbn": "",
+  "title": "X",
+  "year": 3000,
+  "copies": -1
+}
+
+### 12. Поле не того типу — 400, errors.Copies (а не 500)
+POST {{books}}
+Content-Type: application/json
+
+{
+  "isbn": "9786171234567",
+  "title": "X",
+  "year": 2000,
+  "copies": "abc"
+}
+
+### 13. Порожнє тіло — 400
+POST {{books}}
+Content-Type: application/json
+
+### 14. Без Content-Type — 415 Unsupported Media Type
+POST {{books}}
+
+{}
+
+### 15. Видання з історією видач — 409
+DELETE {{books}}/B-001
+
+### 16. Неправильна пагінація — 400, errors.Page і errors.PageSize
+GET {{books}}?page=0&pageSize=500
