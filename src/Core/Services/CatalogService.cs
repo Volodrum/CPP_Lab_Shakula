@@ -1,6 +1,7 @@
 using System.Globalization;
 using Core.Abstractions;
 using Core.Domain;
+using Core.Storage;
 
 namespace Core.Services;
 
@@ -12,9 +13,11 @@ namespace Core.Services;
 // має бути. POST реєструє їх, PUT додає нові або вилучає вільні, DELETE прибирає видання з примірниками.
 // Примірник, який зараз видано або має історію видач, не вилучається — це 409, а не тихе знищення даних.
 //
-// Методи асинхронні й приймають CancellationToken (контракт тижня 8), хоча IBookStore синхронний:
-// на тижні 11 сховище стане EF Core, а сигнатури, які бачить Api, лишаться тими самими.
-public sealed class CatalogService(IBookStore store)
+// Тиждень 11: сховище за IBookStoreAsync (дод. завдання 1) — для EF Core це ToListAsync / SaveChangesAsync.
+// Кожна зміна — в InTransactionAsync: «видання + N примірників» потрапляє в БД цілком або не потрапляє взагалі.
+// Сервіс тепер Scoped (як DbContext під ним), а замок «одна зміна за раз» — спільний CatalogWriteGate.
+// Сигнатури, які бачить Api, не змінилися з тижня 10.
+public sealed class CatalogService
 {
     public const int MaxCopies = 100;
     public const int MaxPageSize = 100;
@@ -22,14 +25,24 @@ public sealed class CatalogService(IBookStore store)
     private static readonly StringComparer TitleOrder =
         StringComparer.Create(CultureInfo.GetCultureInfo("uk-UA"), ignoreCase: true); // «і», «ї», «є» — на своїх місцях
 
-    private readonly IBookStore _store = store ?? throw new ArgumentNullException(nameof(store));
+    private readonly IBookStoreAsync _store;
 
-    // Одна зміна каталогу за раз. lock сховища захищає кожен окремий виклик, а тут треба атомарно
-    // «перевірити ISBN → додати книгу → додати примірники». SemaphoreSlim, бо чекати його можна через await.
-    // Працює лише тоді, коли сервіс один на весь застосунок (Singleton у DI).
-    private readonly SemaphoreSlim _writeGate = new(1, 1);
+    // Одна зміна каталогу за раз: «перевірити ISBN → додати книгу → додати примірники» не перемежовується з іншою.
+    // Без переданого gate кожен сервіс має власний (тести Core, Cli); Api передає один Singleton на всіх.
+    private readonly CatalogWriteGate _writeGate;
 
-    public Task<CatalogPage> SearchAsync(CatalogQuery query, CancellationToken ct = default)
+    public CatalogService(IBookStoreAsync store, CatalogWriteGate? writeGate = null)
+    {
+        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _writeGate = writeGate ?? new CatalogWriteGate();
+    }
+
+    // Синхронне сховище тижнів 5–10 (InMemory, File) — через адаптер, щоб старі виклики не змінювати.
+    public CatalogService(IBookStore store) : this((store ?? throw new ArgumentNullException(nameof(store))).AsAsync())
+    {
+    }
+
+    public async Task<CatalogPage> SearchAsync(CatalogQuery query, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentOutOfRangeException.ThrowIfLessThan(query.Page, 1, nameof(query.Page));
@@ -37,7 +50,7 @@ public sealed class CatalogService(IBookStore store)
             throw new ArgumentOutOfRangeException(nameof(query), query.PageSize, $"Розмір сторінки має бути 1..{MaxPageSize}");
         ct.ThrowIfCancellationRequested();
 
-        IEnumerable<Book> books = _store.List<Book>();
+        IEnumerable<Book> books = await _store.ListAsync<Book>(ct);
 
         if (!string.IsNullOrWhiteSpace(query.Author))
         {
@@ -59,19 +72,19 @@ public sealed class CatalogService(IBookStore store)
         List<Book> matched = books.OrderBy(b => b.Title, TitleOrder).ThenBy(b => b.Id, StringComparer.Ordinal).ToList();
 
         long skip = (long)(query.Page - 1) * query.PageSize; // page=int.MaxValue не переповнить int
-        var copies = CopiesByIsbn();
+        var copies = await CopiesByIsbnAsync(ct);
         List<CatalogEntry> items = skip >= matched.Count
             ? []
             : matched.Skip((int)skip).Take(query.PageSize).Select(b => Entry(b, copies[IsbnRules.Compact(b.Isbn)])).ToList();
 
-        return Task.FromResult(new CatalogPage(items, matched.Count, query.Page, query.PageSize));
+        return new CatalogPage(items, matched.Count, query.Page, query.PageSize);
     }
 
-    public Task<CatalogEntry?> GetAsync(string id, CancellationToken ct = default)
+    public async Task<CatalogEntry?> GetAsync(string id, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        Book? book = string.IsNullOrWhiteSpace(id) ? null : _store.GetById<Book>(id);
-        return Task.FromResult(book is null ? null : Entry(book));
+        Book? book = string.IsNullOrWhiteSpace(id) ? null : await _store.GetByIdAsync<Book>(id, ct);
+        return book is null ? null : await EntryAsync(book, ct);
     }
 
     public async Task<CatalogEntry> CreateAsync(BookDraft draft, CancellationToken ct = default)
@@ -80,20 +93,18 @@ public sealed class CatalogService(IBookStore store)
         EnsureCopies(draft.Copies);
         Book book = Book.Create(NewId("B"), draft.Isbn, draft.Title, draft.Year, draft.Author); // інваріанти — у домені
 
-        await _writeGate.WaitAsync(ct); // скасувати можна лише очікування; почату зміну доводимо до кінця
-        try
+        using (await _writeGate.EnterAsync(ct))
         {
-            EnsureIsbnFree(book.Isbn, exceptId: null);
+            return await _store.InTransactionAsync(async tct =>
+            {
+                await EnsureIsbnFreeAsync(book.Isbn, exceptId: null, tct);
 
-            _store.Add(book);
-            for (int i = 0; i < draft.Copies; i++)
-                _store.Add(BookCopy.Register(NewId("C"), book.Isbn));
+                await _store.AddAsync(book, tct);
+                for (int i = 0; i < draft.Copies; i++)
+                    await _store.AddAsync(BookCopy.Register(NewId("C"), book.Isbn), tct);
 
-            return Entry(book);
-        }
-        finally
-        {
-            _writeGate.Release();
+                return await EntryAsync(book, tct);
+            }, ct);
         }
     }
 
@@ -103,101 +114,99 @@ public sealed class CatalogService(IBookStore store)
         ArgumentNullException.ThrowIfNull(draft);
         EnsureCopies(draft.Copies);
 
-        await _writeGate.WaitAsync(ct);
-        try
+        using (await _writeGate.EnterAsync(ct))
         {
-            Book? current = string.IsNullOrWhiteSpace(id) ? null : _store.GetById<Book>(id);
-            if (current is null) return null;
-
-            Book replacement = Book.Create(current.Id, draft.Isbn, draft.Title, draft.Year, draft.Author);
-            List<BookCopy> copies = CopiesOf(current.Isbn);
-
-            bool isbnChanged = IsbnRules.Compact(current.Isbn) != IsbnRules.Compact(replacement.Isbn);
-            if (isbnChanged)
+            return await _store.InTransactionAsync<CatalogEntry?>(async tct =>
             {
-                EnsureIsbnFree(replacement.Isbn, exceptId: current.Id);
-                if (copies.Count > 0)
-                    throw new DomainException(
-                        $"Видання {current.Id} має {copies.Count} примірн. з ISBN {current.Isbn}: " +
-                        "змінити ISBN можна лише виданню без примірників.");
-            }
+                Book? current = string.IsNullOrWhiteSpace(id) ? null : await _store.GetByIdAsync<Book>(id, tct);
+                if (current is null) return null;
 
-            // Спершу з'ясовуємо, чи зміна можлива взагалі, і лише потім змінюємо сховище: 409 не лишає півзміни.
-            List<BookCopy> toRemove = [];
-            int surplus = copies.Count - draft.Copies;
-            if (surplus > 0)
-            {
-                toRemove = Removable(copies).Take(surplus).ToList();
-                if (toRemove.Count < surplus)
-                    throw new DomainException(
-                        $"Видання {current.Id}: вилучити можна лише {toRemove.Count} з {surplus} зайвих примірн. — " +
-                        "решту видано читачам або вони мають історію видач.");
-            }
+                Book replacement = Book.Create(current.Id, draft.Isbn, draft.Title, draft.Year, draft.Author);
+                List<BookCopy> copies = await CopiesOfAsync(current.Isbn, tct);
 
-            _store.Update(replacement);
-            foreach (BookCopy copy in toRemove)
-                _store.Remove(copy.Id);
-            for (int i = copies.Count; i < draft.Copies; i++)
-                _store.Add(BookCopy.Register(NewId("C"), replacement.Isbn));
+                bool isbnChanged = IsbnRules.Compact(current.Isbn) != IsbnRules.Compact(replacement.Isbn);
+                if (isbnChanged)
+                {
+                    await EnsureIsbnFreeAsync(replacement.Isbn, exceptId: current.Id, tct);
+                    if (copies.Count > 0)
+                        throw new DomainException(
+                            $"Видання {current.Id} має {copies.Count} примірн. з ISBN {current.Isbn}: " +
+                            "змінити ISBN можна лише виданню без примірників.");
+                }
 
-            return Entry(replacement);
-        }
-        finally
-        {
-            _writeGate.Release();
+                // Спершу з'ясовуємо, чи зміна можлива взагалі, і лише потім змінюємо сховище: 409 не лишає півзміни.
+                List<BookCopy> toRemove = [];
+                int surplus = copies.Count - draft.Copies;
+                if (surplus > 0)
+                {
+                    toRemove = (await RemovableAsync(copies, tct)).Take(surplus).ToList();
+                    if (toRemove.Count < surplus)
+                        throw new DomainException(
+                            $"Видання {current.Id}: вилучити можна лише {toRemove.Count} з {surplus} зайвих примірн. — " +
+                            "решту видано читачам або вони мають історію видач.");
+                }
+
+                await _store.UpdateAsync(replacement, tct);
+                foreach (BookCopy copy in toRemove)
+                    await _store.RemoveAsync(copy.Id, tct);
+                for (int i = copies.Count; i < draft.Copies; i++)
+                    await _store.AddAsync(BookCopy.Register(NewId("C"), replacement.Isbn), tct);
+
+                return await EntryAsync(replacement, tct);
+            }, ct);
         }
     }
 
     // false — видання не було (404). Видання з виданими примірниками чи історією видач — DomainException (409).
     public async Task<bool> DeleteAsync(string id, CancellationToken ct = default)
     {
-        await _writeGate.WaitAsync(ct);
-        try
+        using (await _writeGate.EnterAsync(ct))
         {
-            Book? book = string.IsNullOrWhiteSpace(id) ? null : _store.GetById<Book>(id);
-            if (book is null) return false;
+            return await _store.InTransactionAsync(async tct =>
+            {
+                Book? book = string.IsNullOrWhiteSpace(id) ? null : await _store.GetByIdAsync<Book>(id, tct);
+                if (book is null) return false;
 
-            List<BookCopy> copies = CopiesOf(book.Isbn);
-            List<BookCopy> removable = Removable(copies).ToList();
-            if (removable.Count < copies.Count)
-                throw new DomainException(
-                    $"Видання {book.Id} не можна вилучити: {copies.Count - removable.Count} з {copies.Count} примірн. " +
-                    "видано читачам або мають історію видач.");
+                List<BookCopy> copies = await CopiesOfAsync(book.Isbn, tct);
+                List<BookCopy> removable = (await RemovableAsync(copies, tct)).ToList();
+                if (removable.Count < copies.Count)
+                    throw new DomainException(
+                        $"Видання {book.Id} не можна вилучити: {copies.Count - removable.Count} з {copies.Count} примірн. " +
+                        "видано читачам або мають історію видач.");
 
-            foreach (BookCopy copy in copies)
-                _store.Remove(copy.Id);
-            return _store.Remove(book.Id);
-        }
-        finally
-        {
-            _writeGate.Release();
+                foreach (BookCopy copy in copies)
+                    await _store.RemoveAsync(copy.Id, tct);
+                return await _store.RemoveAsync(book.Id, tct);
+            }, ct);
         }
     }
 
-    private void EnsureIsbnFree(string isbn, string? exceptId)
+    private async Task EnsureIsbnFreeAsync(string isbn, string? exceptId, CancellationToken ct)
     {
-        Book? existing = _store.List<Book>().FirstOrDefault(b => b.Id != exceptId && b.HasIsbn(isbn));
+        Book? existing = (await _store.ListAsync<Book>(ct)).FirstOrDefault(b => b.Id != exceptId && b.HasIsbn(isbn));
         if (existing is not null)
             throw new DomainException($"Видання з ISBN {isbn} уже є в каталозі: {existing.Id}.");
     }
 
     // Примірник можна вилучити, якщо він на полиці і жодна видача (навіть закрита) на нього не посилається:
-    // інакше файл сховища містив би видачу без примірника і не відкрився б наступного разу.
-    private IEnumerable<BookCopy> Removable(IEnumerable<BookCopy> copies)
+    // інакше сховище містило б видачу без примірника (у БД це ще й порушення зовнішнього ключа Loans → Copies).
+    private async Task<IEnumerable<BookCopy>> RemovableAsync(IEnumerable<BookCopy> copies, CancellationToken ct)
     {
-        var referenced = _store.List<Loan>().Select(l => l.Copy.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var referenced = (await _store.ListAsync<Loan>(ct)).Select(l => l.Copy.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return copies.Where(c => !c.IsIssued && !referenced.Contains(c.Id));
     }
 
-    private List<BookCopy> CopiesOf(string isbn)
+    private async Task<List<BookCopy>> CopiesOfAsync(string isbn, CancellationToken ct)
     {
         string key = IsbnRules.Compact(isbn);
-        return _store.List<BookCopy>().Where(c => IsbnRules.Compact(c.Isbn) == key).ToList();
+        return (await _store.ListAsync<BookCopy>(ct)).Where(c => IsbnRules.Compact(c.Isbn) == key).ToList();
     }
 
-    private ILookup<string, BookCopy> CopiesByIsbn() => _store.List<BookCopy>().ToLookup(c => IsbnRules.Compact(c.Isbn));
+    private async Task<ILookup<string, BookCopy>> CopiesByIsbnAsync(CancellationToken ct) =>
+        (await _store.ListAsync<BookCopy>(ct)).ToLookup(c => IsbnRules.Compact(c.Isbn));
 
-    private CatalogEntry Entry(Book book) => Entry(book, CopiesOf(book.Isbn));
+    private async Task<CatalogEntry> EntryAsync(Book book, CancellationToken ct) =>
+        Entry(book, await CopiesOfAsync(book.Isbn, ct));
 
     private static CatalogEntry Entry(Book book, IEnumerable<BookCopy> copies)
     {

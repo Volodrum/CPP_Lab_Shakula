@@ -16,12 +16,12 @@ namespace Api.Tests;
 
 // Дод. завдання 4: інтеграційні тести на WebApplicationFactory — справжній конвеєр ASP.NET Core
 // (маршрути, фільтри, обробник винятків, JSON) у пам'яті, без порту і без мережі.
-// Кожен тест — свій екземпляр застосунку з новим сховищем (SampleData), тож тести не ділять стан.
+// Кожен тест — свій екземпляр застосунку з власним файлом SQLite (ApiFactory), засіяним SampleData: тести не ділять стан.
 public class BooksApiTests
 {
     private const string Books = "/api/books";
 
-    private static HttpClient NewClient() => new WebApplicationFactory<Program>().CreateClient();
+    private static HttpClient NewClient() => new ApiFactory().CreateClient();
 
     private static SaveBookRequest Request(string? isbn = null, string title = "Кобзар", int copies = 2) =>
         new(isbn ?? UniqueIsbn(), title, "Тарас Шевченко", 1840, copies);
@@ -201,7 +201,8 @@ public class BooksApiTests
     [Fact] // Scalar і OpenAPI — лише в Development
     public async Task Production_HidesOpenApiAndScalar()
     {
-        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b => b.UseEnvironment("Production"));
+        using var root = new ApiFactory();
+        using var factory = root.WithWebHostBuilder(b => b.UseEnvironment("Production"));
         using var client = factory.CreateClient();
 
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/openapi/v1.json")).StatusCode);
@@ -212,7 +213,8 @@ public class BooksApiTests
     [Fact] // самоперевірка 4: неочікуваний виняток — 500 без типу винятку, stack trace і шляху з диска
     public async Task UnexpectedException_Returns500_WithoutInternals()
     {
-        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        using var root = new ApiFactory();
+        using var factory = root.WithWebHostBuilder(b =>
             b.ConfigureTestServices(s => s.AddSingleton<IBookStore, BrokenStore>()));
         using var client = factory.CreateClient();
 

@@ -465,3 +465,9 @@ data/
 secrets.json
 appsettings.*.local.json
 *.json.tmp
+
+# Лаб. 11: файл SQLite не комітимо — його відтворює `dotnet ef database update` з міграцій (Migrations/ — у git)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
