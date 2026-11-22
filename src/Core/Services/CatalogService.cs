@@ -68,16 +68,42 @@ public sealed class CatalogService
                 || (isbnTerm.Length > 0 && IsbnRules.Compact(b.Isbn).Contains(isbnTerm, StringComparison.Ordinal)));
         }
 
-        // Стабільний порядок — інакше сторінки 1 і 2 могли б перетнутися.
-        List<Book> matched = books.OrderBy(b => b.Title, TitleOrder).ThenBy(b => b.Id, StringComparer.Ordinal).ToList();
+        // Тиждень 12 (дод. завдання 2): сортування на боці сервера, ДО пагінації — інакше клієнт сортував би
+        // лише одну сторінку. Сортування за кількістю примірників потребує підсумків, тож entries рахуються для
+        // всіх збігів (одним запитом примірників, як і раніше). Останній ключ — Id: порядок стабільний,
+        // сторінки 1 і 2 не перетинаються навіть при однакових назвах чи роках.
+        var copies = await CopiesByIsbnAsync(ct);
+        List<CatalogEntry> matched = Sort(books.Select(b => Entry(b, copies[IsbnRules.Compact(b.Isbn)])), query)
+            .ToList();
 
         long skip = (long)(query.Page - 1) * query.PageSize; // page=int.MaxValue не переповнить int
-        var copies = await CopiesByIsbnAsync(ct);
         List<CatalogEntry> items = skip >= matched.Count
             ? []
-            : matched.Skip((int)skip).Take(query.PageSize).Select(b => Entry(b, copies[IsbnRules.Compact(b.Isbn)])).ToList();
+            : matched.Skip((int)skip).Take(query.PageSize).ToList();
 
         return new CatalogPage(items, matched.Count, query.Page, query.PageSize);
+    }
+
+    private static IOrderedEnumerable<CatalogEntry> Sort(IEnumerable<CatalogEntry> entries, CatalogQuery query)
+    {
+        bool desc = query.Descending;
+        IOrderedEnumerable<CatalogEntry> ordered = query.SortBy switch
+        {
+            CatalogSortField.Author => desc
+                ? entries.OrderByDescending(e => e.Book.Author ?? "", TitleOrder)
+                : entries.OrderBy(e => e.Book.Author ?? "", TitleOrder),
+            CatalogSortField.Year => desc
+                ? entries.OrderByDescending(e => e.Book.Year)
+                : entries.OrderBy(e => e.Book.Year),
+            CatalogSortField.Copies => desc
+                ? entries.OrderByDescending(e => e.Copies)
+                : entries.OrderBy(e => e.Copies),
+            _ => desc
+                ? entries.OrderByDescending(e => e.Book.Title, TitleOrder)
+                : entries.OrderBy(e => e.Book.Title, TitleOrder)
+        };
+        // Другорядні ключі: назва (за зростанням) і Id — однаковий порядок за будь-якого основного ключа.
+        return ordered.ThenBy(e => e.Book.Title, TitleOrder).ThenBy(e => e.Book.Id, StringComparer.Ordinal);
     }
 
     public async Task<CatalogEntry?> GetAsync(string id, CancellationToken ct = default)
@@ -229,6 +255,21 @@ public sealed record BookDraft(string Isbn, string Title, int Year, string? Auth
 // Видання з підсумком по примірниках. Book цих чисел не знає — вони з'являються лише тут (як StockLine тижня 7).
 public sealed record CatalogEntry(Book Book, int Copies, int OnShelf);
 
-public sealed record CatalogQuery(string? Author = null, string? Search = null, int Page = 1, int PageSize = 20);
+// SortBy/Descending — тиждень 12 (дод. завдання 2); за замовчуванням — назва за абеткою, як і раніше.
+public sealed record CatalogQuery(
+    string? Author = null,
+    string? Search = null,
+    int Page = 1,
+    int PageSize = 20,
+    CatalogSortField SortBy = CatalogSortField.Title,
+    bool Descending = false);
+
+public enum CatalogSortField
+{
+    Title,
+    Author,
+    Year,
+    Copies
+}
 
 public sealed record CatalogPage(IReadOnlyList<CatalogEntry> Items, int Total, int Page, int PageSize);

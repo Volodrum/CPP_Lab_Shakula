@@ -29,7 +29,7 @@ public static class BookEndpoints
                 return Task.CompletedTask;
             });
 
-        // GET /api/books?author=&search=&page=1&pageSize=20 — список з фільтрами й пагінацією.
+        // GET /api/books?author=&search=&sort=title&page=1&pageSize=20 — список з фільтрами, сортуванням і пагінацією.
         group.MapGet("/", async Task<Ok<PagedResponse<BookDto>>> (
                 [AsParameters] BookListQuery query, CatalogService catalog, CancellationToken ct) =>
             {
@@ -40,6 +40,7 @@ public static class BookEndpoints
             .WithName("ListBooks")
             .WithSummary("Список видань")
             .WithDescription("Фільтри author (частина імені автора) і search (назва, автор або ISBN); " +
+                             "sort: title | author | year | copies, з мінусом — спадання; " +
                              "пагінація page/pageSize. Відповідь: { items, total, page, pageSize }.");
 
         // GET /api/books/{id} — одне видання або 404. Без обмеження типу: id — короткий рядок "B-001".

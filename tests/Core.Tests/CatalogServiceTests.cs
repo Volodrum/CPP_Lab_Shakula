@@ -173,6 +173,44 @@ public class CatalogServiceTests
         Assert.Equal("B-002", Assert.Single(byIsbn.Items).Book.Id);
     }
 
+    [Fact] // тиждень 12 (дод. завдання 2): сортування за роком за спаданням — до пагінації, а не в межах сторінки
+    public async Task SearchAsync_SortsByYearDescending_BeforePaging()
+    {
+        var catalog = new CatalogService(new InMemoryBookStore(SampleData.Items()));
+
+        CatalogPage all = await catalog.SearchAsync(new CatalogQuery(PageSize: 100, SortBy: CatalogSortField.Year, Descending: true));
+        CatalogPage first = await catalog.SearchAsync(new CatalogQuery(PageSize: 3, SortBy: CatalogSortField.Year, Descending: true));
+
+        int[] years = all.Items.Select(e => e.Book.Year).ToArray();
+        Assert.Equal(years.OrderByDescending(y => y), years);
+        Assert.Equal(all.Items.Take(3).Select(e => e.Book.Id), first.Items.Select(e => e.Book.Id));
+    }
+
+    [Fact] // сортування за кількістю примірників (поле, якого немає в Book — рахується з BookCopy)
+    public async Task SearchAsync_SortsByCopies()
+    {
+        var catalog = new CatalogService(new InMemoryBookStore(SampleData.Items()));
+
+        CatalogPage page = await catalog.SearchAsync(new CatalogQuery(PageSize: 100, SortBy: CatalogSortField.Copies));
+
+        int[] copies = page.Items.Select(e => e.Copies).ToArray();
+        Assert.Equal(copies.Order(), copies);
+        Assert.True(copies[0] < copies[^1]);
+    }
+
+    [Fact] // за замовчуванням — назва за абеткою (поведінка тижня 10 не змінилася)
+    public async Task SearchAsync_DefaultSort_IsTitle()
+    {
+        var catalog = new CatalogService(new InMemoryBookStore(SampleData.Items()));
+
+        CatalogPage byDefault = await catalog.SearchAsync(new CatalogQuery(PageSize: 100));
+        CatalogPage byTitle = await catalog.SearchAsync(new CatalogQuery(PageSize: 100, SortBy: CatalogSortField.Title));
+        CatalogPage reversed = await catalog.SearchAsync(new CatalogQuery(PageSize: 100, SortBy: CatalogSortField.Title, Descending: true));
+
+        Assert.Equal(byTitle.Items.Select(e => e.Book.Id), byDefault.Items.Select(e => e.Book.Id));
+        Assert.Equal(byTitle.Items[0].Book.Title, reversed.Items[^1].Book.Title);
+    }
+
     [Fact]
     public async Task SearchAsync_CancelledToken_Throws()
     {

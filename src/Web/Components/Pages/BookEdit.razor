@@ -1,0 +1,208 @@
+@page "/books/new"
+@page "/books/{Id}"
+@implements IDisposable
+@inject BooksApiClient Api
+@inject NavigationManager Navigation
+
+@* Одна форма для двох сценаріїв: без id — створення (POST /api/books), з id — редагування (PUT /api/books/{id}).
+   Помилки 400 від Api (словник errors) показуються біля відповідних полів, 409 — окремим загальним повідомленням. *@
+
+<PageTitle>@(IsNew ? "Нове видання" : "Редагування видання")</PageTitle>
+
+<h1>@(IsNew ? "Нове видання" : "Редагування видання")</h1>
+
+@if (loadError is not null)
+{
+    <div class="alert alert-danger">@loadError</div>
+    <a class="btn btn-outline-secondary" href="books">← До списку</a>
+}
+else if (model is null || editContext is null)
+{
+    <p><em>Завантаження…</em></p>
+}
+else
+{
+    @if (message is not null)
+    {
+        @* Загальне повідомлення: текст 400 («Дані не пройшли перевірку.»), 409 (правило бібліотеки), 404, недоступний Api. *@
+        <div class="alert @(conflict ? "alert-warning" : "alert-danger")" role="alert">
+            <strong>@message</strong>
+            @if (serverErrors.Count > 0)
+            {
+                <ul class="mb-0 mt-1">
+                    @foreach (var (field, text) in serverErrors)
+                    {
+                        <li>@field: @text</li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+
+    <EditForm EditContext="editContext" OnSubmit="SubmitAsync" class="col-lg-7">
+        @if (clientValidation)
+        {
+            <DataAnnotationsValidator />
+        }
+
+        <div class="mb-3">
+            <label class="form-label" for="isbn">ISBN</label>
+            <InputText id="isbn" class="form-control" @bind-Value="model.Isbn" placeholder="10 або 13 цифр, дефіси дозволені" />
+            <ValidationMessage For="() => model.Isbn" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="title">Назва</label>
+            <InputText id="title" class="form-control" @bind-Value="model.Title" />
+            <ValidationMessage For="() => model.Title" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="author">Автор</label>
+            <InputText id="author" class="form-control" @bind-Value="model.Author" />
+            <ValidationMessage For="() => model.Author" />
+        </div>
+        <div class="row">
+            <div class="col-sm-6 mb-3">
+                <label class="form-label" for="year">Рік видання</label>
+                <InputNumber id="year" class="form-control" @bind-Value="model.Year" />
+                <ValidationMessage For="() => model.Year" />
+            </div>
+            <div class="col-sm-6 mb-3">
+                <label class="form-label" for="copies">Примірників</label>
+                <InputNumber id="copies" class="form-control" @bind-Value="model.Copies" />
+                <ValidationMessage For="() => model.Copies" />
+                @if (!IsNew)
+                {
+                    <div class="form-text">Зараз на полиці: @model.Available</div>
+                }
+            </div>
+        </div>
+
+        <div class="form-check mb-3">
+            @* Для демонстрації: без клієнтської перевірки невалідна форма доходить до Api, і видно серверні помилки 400. *@
+            <input class="form-check-input" type="checkbox" id="clientValidation"
+                   checked="@clientValidation" @onchange="ToggleClientValidation" />
+            <label class="form-check-label" for="clientValidation">Перевіряти на клієнті (Data Annotations)</label>
+        </div>
+
+        <button type="submit" class="btn btn-primary" disabled="@saving">@(saving ? "Збереження…" : "Зберегти")</button>
+        <a class="btn btn-outline-secondary ms-2" href="books">Скасувати</a>
+    </EditForm>
+}
+
+@code {
+    // null — створення; інакше id з маршруту /books/{Id}.
+    [Parameter] public string? Id { get; set; }
+
+    private bool IsNew => string.IsNullOrEmpty(Id);
+
+    private BookModel? model;
+    private EditContext? editContext;
+    private ValidationMessageStore? serverMessages;
+    private readonly List<(string Field, string Text)> serverErrors = [];
+    private string? loadError;
+    private string? message;
+    private bool conflict;
+    private bool saving;
+    private bool clientValidation = true;
+    private string? loadedFor;
+
+    // Дод. завдання 4: скасування запиту, якщо користувач пішов зі сторінки раніше, ніж Api відповів.
+    private readonly CancellationTokenSource cts = new();
+
+    // OnParametersSetAsync, а не OnInitializedAsync: Blazor використовує той самий екземпляр компонента,
+    // коли змінюється лише параметр маршруту (/books/new → /books/B-1 чи /books/B-1 → /books/B-2),
+    // і OnInitializedAsync вдруге не викликається. Тут дані перечитуються щоразу, коли змінився Id.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (model is not null && loadedFor == Id) return;
+        loadedFor = Id;
+        loadError = null;
+        message = null;
+        model = null;
+
+        if (IsNew)
+        {
+            Attach(new BookModel());
+            return;
+        }
+
+        try
+        {
+            BookDto? dto = await Api.FindAsync(Id!, cts.Token);
+            if (dto is null)
+                loadError = $"Видання з id «{Id}» не знайдено (404). Можливо, його вже видалили.";
+            else
+                Attach(BookModel.FromDto(dto));
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
+        catch (ApiUnavailableException ex) { loadError = ex.Message; }
+        catch (HttpRequestException ex) { loadError = ex.Message; }
+    }
+
+    private void Attach(BookModel value)
+    {
+        model = value;
+        editContext = new EditContext(model);
+        serverMessages = new ValidationMessageStore(editContext);
+        // Користувач виправляє поле — серверна помилка біля нього зникає (нова перевірка буде при збереженні).
+        editContext.OnFieldChanged += (_, e) =>
+        {
+            serverMessages.Clear(e.FieldIdentifier);
+            editContext.NotifyValidationStateChanged();
+        };
+    }
+
+    private void ToggleClientValidation(ChangeEventArgs e)
+    {
+        clientValidation = e.Value is true;
+        ClearServerErrors();
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (model is null || editContext is null || serverMessages is null) return;
+
+        ClearServerErrors();
+        // Клієнтська перевірка (Data Annotations) — лише для зручності; без неї Validate() нічого не перевіряє,
+        // і рішення ухвалює Api.
+        if (!editContext.Validate()) return;
+
+        saving = true;
+        ApiResult result = await Api.SaveAsync(model, cts.Token);
+        saving = false;
+
+        if (result.Ok)
+        {
+            Navigation.NavigateTo("books");
+            return;
+        }
+
+        message = result.Message;
+        conflict = result.IsConflict;
+        foreach (var (key, texts) in result.Errors ?? [])
+        {
+            // Ключ Api ("Isbn", "Copies") → поле моделі з тією самою назвою; невідомий ключ ("body") — лише в загальний список.
+            var property = typeof(BookModel).GetProperty(key, System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+            if (property is not null)
+                serverMessages.Add(new FieldIdentifier(model, property.Name), texts);
+            serverErrors.AddRange(texts.Select(t => (property?.Name ?? key, t)));
+        }
+        editContext.NotifyValidationStateChanged();
+    }
+
+    private void ClearServerErrors()
+    {
+        message = null;
+        conflict = false;
+        serverErrors.Clear();
+        serverMessages?.Clear();
+        editContext?.NotifyValidationStateChanged();
+    }
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
+}

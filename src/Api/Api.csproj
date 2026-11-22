@@ -3,6 +3,12 @@
   <ItemGroup>
     <ProjectReference Include="..\Core\Core.csproj" />
     <ProjectReference Include="..\Infrastructure\Infrastructure.csproj" />
+    <!-- Тиждень 12 (дод. завдання 3): DTO HTTP-контракту спільні з Web -->
+    <ProjectReference Include="..\Contracts\Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="CrossApp.Contracts" />
   </ItemGroup>
 
   <ItemGroup>

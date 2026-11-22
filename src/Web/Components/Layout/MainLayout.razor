@@ -1,0 +1,30 @@
+@inherits LayoutComponentBase
+@inject BooksApiClient Api
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            @* Адреса береться з того самого HttpClient (Api:BaseUrl), а не з літерала в розмітці. *@
+            <span class="text-muted small me-3">Api: @Api.BaseAddress</span>
+            <a href="@ScalarUrl" target="_blank">Scalar UI</a>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Сталася неочікувана помилка.
+    <a href="." class="reload">Перезавантажити</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private string ScalarUrl => new Uri(Api.BaseAddress!, "scalar/v1").ToString();
+}

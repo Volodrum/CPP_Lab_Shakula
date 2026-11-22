@@ -1,0 +1,44 @@
+@page "/"
+@implements IDisposable
+@inject BooksApiClient Api
+
+<PageTitle>CrossApp · Бібліотека</PageTitle>
+
+<h1>Каталог бібліотеки</h1>
+
+<p>
+    Blazor-клієнт (режим <strong>Interactive Server</strong>) до власного HTTP API.
+    Усі дані — з <code>@Api.BaseAddress</code>: Web не має доступу до бази даних і не дублює правил бібліотеки.
+</p>
+
+@if (apiAlive is null)
+{
+    <p><em>Перевіряємо Api…</em></p>
+}
+else if (apiAlive.Value)
+{
+    <div class="alert alert-success">Api доступний (GET /health → 200).</div>
+}
+else
+{
+    <div class="alert alert-danger">@BooksApiClient.Unavailable</div>
+}
+
+<a class="btn btn-primary" href="books">Перейти до списку видань</a>
+
+@code {
+    private readonly CancellationTokenSource cts = new();
+    private bool? apiAlive;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { apiAlive = await Api.PingAsync(cts.Token); }
+        catch (OperationCanceledException) { /* користувач пішов зі сторінки */ }
+    }
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
+}

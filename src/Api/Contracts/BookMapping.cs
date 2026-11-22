@@ -12,8 +12,20 @@ public static class BookMapping
     public static BookDraft ToDraft(this SaveBookRequest request) =>
         new(request.Isbn, request.Title, request.Year, request.Author, request.Copies);
 
-    public static CatalogQuery ToQuery(this BookListQuery query) =>
-        new(query.Author, query.Search, query.Page, query.PageSize);
+    // "-year" → (Year, спадання). Значення вже перевірив BookListQueryValidator.
+    public static CatalogQuery ToQuery(this BookListQuery query)
+    {
+        string sort = string.IsNullOrWhiteSpace(query.Sort) ? BookSort.Default : query.Sort.Trim();
+        bool descending = sort.StartsWith('-');
+        CatalogSortField field = sort.TrimStart('-').ToLowerInvariant() switch
+        {
+            BookSort.Author => CatalogSortField.Author,
+            BookSort.Year => CatalogSortField.Year,
+            BookSort.Copies => CatalogSortField.Copies,
+            _ => CatalogSortField.Title
+        };
+        return new CatalogQuery(query.Author, query.Search, query.Page, query.PageSize, field, descending);
+    }
 
     public static PagedResponse<BookDto> ToResponse(this CatalogPage page) =>
         new(page.Items.Select(ToDto).ToList(), page.Total, page.Page, page.PageSize);

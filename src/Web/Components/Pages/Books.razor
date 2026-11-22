@@ -1,0 +1,259 @@
+@page "/books"
+@implements IDisposable
+@inject BooksApiClient Api
+
+@* Список видань (варіант «Бібліотека»): автор, кількість примірників, пошук за автором.
+   Режим InteractiveServer задано глобально в App.razor (для всіх маршрутизованих сторінок).
+   Фільтр, сортування і пагінацію виконує Api (query-параметри), сторінка лише показує результат. *@
+
+<PageTitle>Видання</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="mb-0">Видання</h1>
+    <a class="btn btn-primary" href="books/new">Додати</a>
+</div>
+
+<div class="row g-2 mb-3">
+    <div class="col-sm-6">
+        <input class="form-control" type="search" placeholder="Пошук за автором…" aria-label="Пошук за автором"
+               value="@author" @oninput="OnAuthorInput" />
+    </div>
+    <div class="col-sm-4">
+        <select class="form-select" aria-label="Сортування" value="@sort" @onchange="OnSortChanged">
+            @foreach (var option in SortOptions)
+            {
+                <option value="@option.Key">@option.Value</option>
+            }
+        </select>
+    </div>
+</div>
+
+@if (notice is not null)
+{
+    <div class="alert @(notice.Ok ? "alert-success" : "alert-warning") alert-dismissible">
+        @notice.Text
+        <button type="button" class="btn-close" aria-label="Закрити" @onclick="() => notice = null"></button>
+    </div>
+}
+
+@if (error is not null)
+{
+    <div class="alert alert-danger">
+        @error
+        <button class="btn btn-sm btn-outline-danger ms-3" @onclick="ReloadAsync">Повторити</button>
+    </div>
+}
+else if (current is null)
+{
+    <p><em>Завантаження…</em></p>
+}
+else if (current.Total == 0)
+{
+    <p>@EmptyText</p>
+}
+else
+{
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th>ISBN</th>
+                <th role="button" @onclick="() => SortByAsync(BookSort.Title)">Назва @Arrow(BookSort.Title)</th>
+                <th role="button" @onclick="() => SortByAsync(BookSort.Author)">Автор @Arrow(BookSort.Author)</th>
+                <th role="button" class="text-end" @onclick="() => SortByAsync(BookSort.Year)">Рік @Arrow(BookSort.Year)</th>
+                <th role="button" class="text-end" @onclick="() => SortByAsync(BookSort.Copies)">Прим. @Arrow(BookSort.Copies)</th>
+                <th class="text-end">На полиці</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in current.Items)
+            {
+                @* Підсвітка: жовтим — усі примірники видано, сірим — у фонді немає жодного примірника. *@
+                <tr class="@RowClass(item)">
+                    <td><code>@item.Isbn</code></td>
+                    <td>@item.Title</td>
+                    <td>@(item.Author ?? "—")</td>
+                    <td class="text-end">@item.Year</td>
+                    <td class="text-end">@item.Copies</td>
+                    <td class="text-end">@item.Available</td>
+                    <td class="text-end text-nowrap">
+                        <a class="btn btn-sm btn-outline-primary" href="@($"books/{item.Id}")">Редагувати</a>
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => pendingDelete = item">Видалити</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <p class="small text-muted mb-2">
+        <span class="badge text-bg-warning">&nbsp;</span> усі примірники видано ·
+        <span class="badge text-bg-secondary">&nbsp;</span> примірників у фонді немає
+    </p>
+
+    <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-sm btn-outline-secondary" disabled="@(request.Page <= 1)"
+                @onclick="() => GoToPageAsync(request.Page - 1)">← Назад</button>
+        <span>Сторінка @request.Page з @PageCount · показано @current.Items.Count з @current.Total</span>
+        <button class="btn btn-sm btn-outline-secondary" disabled="@(request.Page >= PageCount)"
+                @onclick="() => GoToPageAsync(request.Page + 1)">Далі →</button>
+    </div>
+}
+
+@if (pendingDelete is not null)
+{
+    @* Дод. завдання 1: підтвердження видалення. Після DELETE список перечитується з Api без перезавантаження сторінки. *@
+    <div class="modal d-block" tabindex="-1" role="dialog" style="background: rgba(0,0,0,.4)">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Видалити видання?</h5></div>
+                <div class="modal-body">
+                    <p>«@pendingDelete.Title» (@pendingDelete.Isbn) буде вилучено з каталогу разом із вільними примірниками.</p>
+                    <p class="text-muted small mb-0">Якщо примірники видано або є історія видач, Api відмовить (409).</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" disabled="@deleting" @onclick="() => pendingDelete = null">Скасувати</button>
+                    <button class="btn btn-danger" disabled="@deleting" @onclick="ConfirmDeleteAsync">Видалити</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly Dictionary<string, string> SortOptions = new()
+    {
+        [BookSort.Title] = "Назва (А→Я)",
+        ["-" + BookSort.Title] = "Назва (Я→А)",
+        [BookSort.Author] = "Автор (А→Я)",
+        ["-" + BookSort.Author] = "Автор (Я→А)",
+        [BookSort.Year] = "Рік (старіші спершу)",
+        ["-" + BookSort.Year] = "Рік (новіші спершу)",
+        [BookSort.Copies] = "Примірників (менше спершу)",
+        ["-" + BookSort.Copies] = "Примірників (більше спершу)"
+    };
+
+    private BookListRequest request = new();
+    private PagedResponse<BookDto>? current;
+    private string? error;
+    private string author = "";
+    private string sort = BookSort.Default;
+    private BookDto? pendingDelete;
+    private bool deleting;
+    private Notice? notice;
+
+    // Дод. завдання 4: один CancellationTokenSource на «поточне» завантаження. Новий запит (наступна літера
+    // в пошуку, інша сторінка) скасовує попередній; Dispose (перехід на іншу сторінку) скасовує останній.
+    // Так відповіді не приходять у неправильному порядку, а Api не обробляє вже непотрібних запитів.
+    private CancellationTokenSource? loadCts;
+
+    private int PageCount => current is null ? 1 : Math.Max(1, (int)Math.Ceiling(current.Total / (double)current.PageSize));
+
+    private string EmptyText => string.IsNullOrWhiteSpace(author)
+        ? "Записів ще немає."
+        : $"Видань автора «{author.Trim()}» не знайдено.";
+
+    // OnInitializedAsync: у сторінки немає параметрів маршруту, дані потрібні один раз при створенні компонента.
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync(int debounceMs = 0)
+    {
+        loadCts?.Cancel();
+        loadCts?.Dispose();
+        var cts = loadCts = new CancellationTokenSource();
+        try
+        {
+            if (debounceMs > 0)
+                await Task.Delay(debounceMs, cts.Token); // пауза між натисканнями — запит лише після останнього
+            var result = await Api.ListAsync(request, cts.Token);
+
+            // Остання сторінка спорожніла (видалили її єдиний запис) — показати попередню.
+            if (result.Items.Count == 0 && result.Total > 0 && request.Page > 1)
+            {
+                request = request with { Page = Math.Max(1, (int)Math.Ceiling(result.Total / (double)request.PageSize)) };
+                result = await Api.ListAsync(request, cts.Token);
+            }
+            current = result;
+            error = null;
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            // Скасовано новішим запитом або переходом зі сторінки — нічого не показуємо.
+        }
+        catch (ApiUnavailableException ex)
+        {
+            error = ex.Message;
+        }
+        catch (HttpRequestException ex)
+        {
+            error = ex.Message; // напр. «Сервер повернув 500.»
+        }
+    }
+
+    private Task OnAuthorInput(ChangeEventArgs e)
+    {
+        author = e.Value?.ToString() ?? "";
+        request = request with { Author = author, Page = 1 };
+        return LoadAsync(debounceMs: 300);
+    }
+
+    private Task OnSortChanged(ChangeEventArgs e)
+    {
+        sort = e.Value?.ToString() ?? BookSort.Default;
+        request = request with { Sort = sort, Page = 1 };
+        return LoadAsync();
+    }
+
+    // Клік по заголовку: той самий стовпчик — змінити напрям, інший — за зростанням.
+    private Task SortByAsync(string field)
+    {
+        sort = sort == field ? "-" + field : field;
+        request = request with { Sort = sort, Page = 1 };
+        return LoadAsync();
+    }
+
+    private static string? RowClass(BookDto item) => item switch
+    {
+        { Copies: 0 } => "table-secondary",
+        { Available: 0 } => "table-warning",
+        _ => null
+    };
+
+    private string Arrow(string field) => sort == field ? "▲" : sort == "-" + field ? "▼" : "";
+
+    private Task GoToPageAsync(int number)
+    {
+        request = request with { Page = Math.Clamp(number, 1, PageCount) };
+        return LoadAsync();
+    }
+
+    private Task ReloadAsync()
+    {
+        error = null;
+        current = null;
+        return LoadAsync();
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (pendingDelete is null) return;
+        deleting = true;
+        var target = pendingDelete;
+        ApiResult result = await Api.DeleteAsync(target.Id);
+        deleting = false;
+        pendingDelete = null;
+
+        notice = result.Ok
+            ? new Notice(true, $"Видання «{target.Title}» вилучено.")
+            : new Notice(false, result.Message ?? "Не вдалося видалити.");
+        if (result.Ok || result.IsNotFound)
+            await LoadAsync(); // лише перечитати дані; сторінка в браузері не перезавантажується
+    }
+
+    public void Dispose()
+    {
+        loadCts?.Cancel();
+        loadCts?.Dispose();
+    }
+
+    private sealed record Notice(bool Ok, string Text);
+}

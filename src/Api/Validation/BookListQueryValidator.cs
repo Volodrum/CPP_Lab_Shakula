@@ -18,5 +18,10 @@ public sealed class BookListQueryValidator : AbstractValidator<BookListQuery>
 
         RuleFor(q => q.Search).MaximumLength(100).WithMessage("Рядок пошуку — до 100 символів.");
         RuleFor(q => q.Author).MaximumLength(100).WithMessage("Фільтр автора — до 100 символів.");
+
+        // Тиждень 12: невідомий ключ сортування — 400 з переліком допустимих, а не тихе «за назвою».
+        RuleFor(q => q.Sort)
+            .Must(BookSort.IsAllowed)
+            .WithMessage($"Сортування: одне з {string.Join(", ", BookSort.Allowed)}.");
     }
 }

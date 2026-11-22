@@ -18,6 +18,8 @@ using Scalar.AspNetCore;
 // Цей файл — composition root: лише тут відомо, яке сховище стоїть за IBookStore.
 // Тиждень 11: за IBookStore тепер EfBookStore (Infrastructure, EF Core + SQLite). Маршрути, DTO і формат помилок
 // не змінилися — змінилася лише реєстрація сховища в DI нижче.
+// Тиждень 12: другий клієнт — Blazor (src/Web). Для нього тут лише CORS-політика і ?sort=; DTO перенесено
+// в спільний src/Contracts (дод. завдання 3), JSON від цього не змінився.
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------- OpenAPI-документ /openapi/v1.json (UI Scalar підключається нижче, лише в Development)
@@ -70,6 +72,21 @@ builder.Services.AddScoped(sp =>
 builder.Services.AddSingleton<IValidator<SaveBookRequest>, SaveBookRequestValidator>();
 builder.Services.AddSingleton<IValidator<BookListQuery>, BookListQueryValidator>();
 
+// ---------- CORS (тиждень 12). Браузер блокує читання відповіді на міжджерельний fetch/XHR, якщо сервер
+// не відповів Access-Control-Allow-Origin з точним origin клієнта (схема + хост + порт).
+// Потрібно Blazor WebAssembly чи іншому SPA з іншого origin. Web у режимі InteractiveServer звертається до Api
+// з процесу сервера (HttpClient → HttpClient), браузер у цьому запиті не бере участі, тож CORS до нього не застосовується.
+// Scalar працює без CORS, бо сторінка /scalar/v1 віддається тим самим Api — це той самий origin.
+// CORS — не захист Api: curl чи інший сервер ці заголовки просто ігнорують.
+const string WebCorsPolicy = "web";
+var webOrigins = (builder.Configuration["Cors:WebOrigin"] ?? "http://localhost:5090")
+    .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+builder.Services.AddCors(o => o.AddPolicy(WebCorsPolicy, p => p
+    .WithOrigins(webOrigins)
+    .AllowAnyHeader()
+    .AllowAnyMethod()
+    .WithExposedHeaders("Location"))); // щоб WASM-клієнт міг прочитати Location після 201
+
 var app = builder.Build();
 
 // ---------- Схема БД. У Development — міграції при старті (зручно на парі); у Production схему оновлюють
@@ -96,6 +113,8 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();      // /scalar/v1
     app.MapGet("/", () => Results.Redirect("/scalar/v1")).ExcludeFromDescription();
 }
+
+app.UseCors(WebCorsPolicy); // обов'язково до MapBooks(): політика має стояти в конвеєрі до кінцевих точок
 
 app.MapGet("/health", () => TypedResults.Ok(new { status = "ok" }))
     .WithTags("Service")

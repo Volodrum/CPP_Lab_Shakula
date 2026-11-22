@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Тиждень 12: Blazor Web App, режим Interactive Server (шаблон blazor, interactivity Server, all-interactive).
+       Web — другий клієнт Api. Посилання лише на спільні DTO (src/Contracts): ні Core, ні Infrastructure,
+       ні рядка підключення до БД — тільки HTTP. Тест WebArchitectureTests перевіряє це. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Contracts\Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="CrossApp.Contracts" />
+  </ItemGroup>
+
+</Project>

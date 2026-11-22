@@ -1,4 +1,4 @@
-namespace Api.Contracts;
+namespace CrossApp.Contracts;
 
 // Відповідь списку: { items, total, page, pageSize }. total — кількість усіх збігів фільтра,
 // а не лише цієї сторінки: клієнту досить його, щоб намалювати перемикач сторінок.

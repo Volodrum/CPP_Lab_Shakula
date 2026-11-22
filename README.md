@@ -5,195 +5,257 @@
 - **Студент**: Шакула Володимир, група ФЕІ-32с
 - **Предметна область**: Бібліотека (варіант Б)
 - **Репозиторій**: <https://github.com/Volodrum/CPP_Lab_Shakula>
-- **Середовище вимірювань**: Windows 11 Home x64 (10.0.26200), .NET SDK 10.0.400, runtime .NET 10.0.11, dotnet-ef 10.0.15
+- **Середовище вимірювань**: Windows 11 Home x64 (10.0.26200), .NET SDK 10.0.400, runtime .NET 10.0.11, dotnet-ef 10.0.15, bUnit 2.15.2
 
-> Опис лабораторних 1–4 (з виводами консолі) — у [README_labs1-4.md](README_labs1-4.md), лабораторної 5 — у [README_lab05.md](README_lab05.md), 6 — у [README_lab06.md](README_lab06.md), 7 — у [README_lab07.md](README_lab07.md), 8 — у [README_lab08.md](README_lab08.md), 9 — у [README_lab09.md](README_lab09.md), 10 — у [README_lab10.md](README_lab10.md).
+> Опис лабораторних 1–4 (з виводами консолі) — у [README_labs1-4.md](README_labs1-4.md), лабораторної 5 — у [README_lab05.md](README_lab05.md), 6 — у [README_lab06.md](README_lab06.md), 7 — у [README_lab07.md](README_lab07.md), 8 — у [README_lab08.md](README_lab08.md), 9 — у [README_lab09.md](README_lab09.md), 10 — у [README_lab10.md](README_lab10.md), 11 — у [README_lab11.md](README_lab11.md).
 
 ---
 
-## Лабораторна робота 11. EF Core + SQLite: міграції, зв'язок 1:N, заміна сховища
+## Лабораторна робота 12. Blazor-клієнт до власного API: перегляд, створення, редагування
 
-**Мета**: перевести `src/Api` на постійне сховище, що однаково працює у Windows, Linux і macOS, не змінюючи HTTP-маршрутів і контракту API. Сховище замінено через уже наявний інтерфейс Core, а схема БД створюється і змінюється міграціями, які лежать у git.
+**Мета**: завершити наскрізний кросплатформний цикл браузерним інтерфейсом. Blazor-застосунок показує і змінює дані лише через HTTP-контракт `/api/books`, без доступу до бази даних і без дублювання бізнес-правил.
 
-**Варіант (бібліотека)**: `Book 1:N Copy` (інвентарний номер, чи виданий), унікальний ISBN; плюс `Copy 1:N Loan` (журнал видач) другою міграцією.
+**Варіант (бібліотека)**: список видань з автором і кількістю примірників, пошук за автором; форма видання (створення/редагування).
+Назви з методички відповідають так: `Products.razor` → `Books.razor`, `ProductEdit.razor` → `BookEdit.razor`, `ProductsApiClient` → `BooksApiClient`, `ProductModel` → `BookModel`.
 
-Додаткові завдання, виконані в цій роботі:
+Виконано всі чотири додаткові завдання:
 
-1. **Наскрізний async-контракт** — `IBookStoreAsync` у Core (`ListAsync`, `GetByIdAsync`, `AddAsync`, `UpdateAsync`, `RemoveAsync`, `InTransactionAsync`). `EfBookStore` реалізує його через `ToListAsync` / `SaveChangesAsync`, `CatalogService` викликає лише асинхронні методи. Синхронний `IBookStore` тижня 5 лишився без змін.
-2. **Друга міграція `AddLoans`** — таблиця `Loans` з FK на `Copies` (`RESTRICT`). Це показує, як схема еволюціонує, як працює `Down` (тест відкату) і що генерує `migrations script`.
-3. **Стартові дані** — `DbSeeder` заповнює лише порожню БД (19 видань, 52 примірники, 21 видача); повторний запуск нічого не дублює.
-4. **Керований конфлікт замість 500** — `UNIQUE` / `FOREIGN KEY` з SQLite (`DbUpdateException`) перекладається в `DomainException` → **409**. Тест: 10 паралельних POST з одним ISBN дають рівно один 201, решта отримують 409.
-5. **Інтеграційні тести на справжній SQLite** — новий `tests/Infrastructure.Tests` (20 тестів) і `tests/Api.Tests`, переведений на тимчасові файли SQLite (21 тест, із них 3 нові, зокрема тест «перезапуску» API).
+1. **Видалення з підтвердженням** — модальне вікно, `DELETE /api/books/{id}`, після 204 список перечитується без перезавантаження сторінки; 409 (є видачі) показується поясненням сервера.
+2. **Пошук і сортування на боці Api** — `GET /api/books?author=&sort=title|author|year|copies` (мінус — спадання), сортування в `CatalogService` до пагінації; невідомий `sort` → 400.
+3. **Спільний проєкт `src/Contracts`** з DTO для Api і Web (`BookDto`, `SaveBookRequest`, `PagedResponse<T>`, `BookSort`) — плюси і мінуси в розділі 7.
+4. **Скасування запитів** — `CancellationTokenSource` у сторінках: новий пошук скасовує попередній запит (debounce 300 мс), перехід на іншу сторінку скасовує незавершений.
 
-### Запуск і міграції
+### Запуск (два процеси)
 
-Інструмент (один раз на машину): `dotnet tool install --global dotnet-ef --version "10.*"`; перевірка: `dotnet ef --version` → `10.0.15`.
+| Термінал | Команда (з кореня репозиторію) | Порт |
+| :------- | :----------------------------- | :--- |
+| 1 — Api | `dotnet run --project src/Api --urls http://localhost:5080` | `http://localhost:5080` (Scalar: `/scalar/v1`) |
+| 2 — Web | `dotnet run --project src/Web --urls http://localhost:5090` | `http://localhost:5090/books` |
+| перевірка контракту до UI | `curl -s http://localhost:5080/api/books` | — |
+| тести | `dotnet test` | 144 тести: 57 Core + 20 Infrastructure + 29 Api + 38 Web |
 
-| Команда (з кореня репозиторію) | Що робить |
-| :----------------------------- | :-------- |
-| `dotnet ef database update --project src/Infrastructure --startup-project src/Api` | Створює/оновлює `src/Api/data/app.db` до останньої міграції |
-| `dotnet ef migrations add <Name> --project src/Infrastructure --startup-project src/Api` | Нова міграція після зміни моделі (`Persistence/*`) |
-| `dotnet ef migrations list --project src/Infrastructure --startup-project src/Api` | `20261116173406_InitialCreate`, `20261116173414_AddLoans` |
-| `dotnet ef migrations script --project src/Infrastructure --startup-project src/Api -o schema.sql` | SQL-скрипт усіх міграцій (для Production) |
-| `dotnet ef database update InitialCreate ...` | Відкат до `InitialCreate` (виконує `Down` міграції `AddLoans`) |
-| `dotnet run --project src/Api` | API на `http://localhost:5080`; у Development міграції й сідування виконуються при старті |
-| `sqlite3 src/Api/data/app.db ".tables"` | `Books  Copies  Loans  __EFMigrationsHistory  __EFMigrationsLock` |
-| `dotnet test` | 95 тестів: 54 Core + 20 Infrastructure + 21 Api |
+Обидва порти зафіксовано також у `Properties/launchSettings.json` (профіль `http`), тож `dotnet run --project src/Api` і `dotnet run --project src/Web` без `--urls` дають ті самі адреси. Порядок: спочатку Api, потім Web (Web без Api запускається, але показує «Api недоступний…»).
 
-**Рядок підключення** — ключ `ConnectionStrings:AppDb` (`src/Api/appsettings.json`), за замовчуванням `Data Source=data/app.db`. Відносний шлях рахується від `ContentRootPath` (`src/Api`), а не від поточного каталогу, тому `dotnet run` і `dotnet ef` працюють з одним і тим самим файлом. Перевизначення: змінна середовища `ConnectionStrings__AppDb="Data Source=/tmp/library.db"`.
-
-**Як скинути БД:**
+Порожній каталог для демонстрації «Записів ще немає.» — окремий файл БД без сідування:
 
 ```bash
-dotnet ef database drop --force --project src/Infrastructure --startup-project src/Api   # або просто видалити src/Api/data/app.db
-dotnet ef database update --project src/Infrastructure --startup-project src/Api         # схема з міграцій
-dotnet run --project src/Api                                                             # Development: засіє SampleData
+ConnectionStrings__AppDb="Data Source=data/demo.db" Catalog__Seed=false dotnet run --project src/Api --urls http://localhost:5080
 ```
 
-`Catalog__Seed=false` вимикає сідування, тоді каталог після скидання порожній. Поза Development міграції при старті не запускаються; їх можна ввімкнути через `Database__MigrateOnStartup=true`, але в Production правильніше застосовувати `database update` або SQL-скрипт.
+**Ключі конфігурації:**
 
-### 1. Структура і напрямок залежностей
+| Проєкт | Ключ | Значення за замовчуванням | Призначення |
+| :----- | :--- | :------------------------ | :---------- |
+| Web | `Api:BaseUrl` | `http://localhost:5080` | базова адреса Api для `AddHttpClient<BooksApiClient>`; змінна середовища `Api__BaseUrl` |
+| Web | `Api:TimeoutSeconds` | `10` | `HttpClient.Timeout`: завислий Api дає повідомлення, а не вічне «Завантаження…» |
+| Api | `Cors:WebOrigin` | `http://localhost:5090` | origin браузерного клієнта для CORS (кілька — через `,`); змінна `Cors__WebOrigin` |
+| Api | `ConnectionStrings:AppDb` | `Data Source=data/app.db` | без змін з тижня 11; у Web такого ключа немає |
 
-```
-CrossApp/
-├── src/
-│   ├── Core/                           ← без EF Core (Core.csproj без жодного PackageReference)
-│   │   ├── Abstractions/IBookStore.cs        ← без змін (тиждень 5)
-│   │   ├── Abstractions/IBookStoreAsync.cs   ← НОВЕ: async-контракт (дод. завд. 1)
-│   │   ├── Storage/SyncBookStoreAdapter.cs   ← НОВЕ: IBookStore → IBookStoreAsync (InMemory/File)
-│   │   └── Services/CatalogService.cs        ← async над IBookStoreAsync, кожна зміна в транзакції
-│   │       Services/CatalogWriteGate.cs      ← НОВЕ: замок «одна зміна за раз» (Singleton)
-│   ├── Infrastructure/                 ← НОВЕ: усе, що знає про EF Core
-│   │   ├── Persistence/Rows.cs               ← BookRow, CopyRow, LoanRow (persistence-моделі)
-│   │   ├── Persistence/AppDbContext.cs       ← DbContext + Fluent API
-│   │   ├── Persistence/RowMapping.cs         ← Row ↔ домен через Book.Create / FromDto
-│   │   ├── Persistence/DbSeeder.cs           ← стартові дані в порожню БД
-│   │   ├── Persistence/SqliteConnectionStrings.cs ← відносний Data Source → абсолютний від ContentRoot
-│   │   ├── EfBookStore.cs                    ← IBookStore + IBookStoreAsync над AppDbContext
-│   │   └── Migrations/                       ← InitialCreate, AddLoans, AppDbContextModelSnapshot (у git)
-│   └── Api/                            ← Program.cs: AddDbContext + AddScoped; маршрути без змін
-└── tests/
-    ├── Core.Tests/                     ← без змін (54)
-    ├── Infrastructure.Tests/           ← НОВЕ (20): міграції, FK, Down, EfBookStore, async, транзакції
-    └── Api.Tests/                      ← ApiFactory: кожен тест — свій файл SQLite (21)
+На тижні 14 ці ключі підмінить конфігурація розгортання (змінні середовища контейнера), код не зміниться.
+
+### 1. Обраний режим: Blazor Web App, Interactive Server
+
+```bash
+dotnet new blazor -n Web -o src/Web -f net10.0 --interactivity Server --all-interactive
+dotnet new classlib -n Contracts -o src/Contracts -f net10.0
+dotnet sln add src/Web/Web.csproj src/Contracts/Contracts.csproj tests/Web.Tests/Web.Tests.csproj
 ```
 
-`Core` ← `Infrastructure` (`Microsoft.EntityFrameworkCore.Sqlite` 10.0.15, `…Design`) ← `Api` (`…Design` окремо, бо в Infrastructure він `PrivateAssets=all` і транзитивно не передається). Тест `Core_DoesNotDependOnEntityFramework` перевіряє і `Core.csproj`, і посилання збірки Core.
+**Де виконується код.** Увесь C#-код компонентів (`Books.razor`, `BookEdit.razor`) і `BooksApiClient` виконується **на сервері, у процесі Web** (порт 5090). Браузер завантажує лише HTML, CSS і `blazor.web.js`, відкриває WebSocket `/_blazor` (SignalR) і надсилає туди події (клік, введення), а у відповідь отримує різницю DOM. DLL застосунку в браузер не потрапляють.
 
-### 2. Схема
+Режим задано глобально в `Components/App.razor` для всіх маршрутизованих сторінок:
 
-| Таблиця | Стовпці | Ключі й обмеження |
-| :------ | :------ | :---------------- |
-| `Books` | `Id` TEXT(32) NOCASE, `Isbn` TEXT(20), `IsbnKey` TEXT(13), `Title` TEXT(200), `Year` INTEGER, `Author` TEXT(200) NULL | PK `Id`; **UNIQUE** `IX_Books_IsbnKey` |
-| `Copies` | `Id` TEXT(32) NOCASE, `BookId` TEXT(32), `IsIssued` INTEGER, `RegisteredAt` TEXT | PK `Id`; **FK** `BookId → Books.Id` **ON DELETE CASCADE**; індекс `IX_Copies_BookId` |
-| `Loans` | `Id`, `CopyId`, `ReaderId`, `IssuedOn` TEXT (DateOnly), `ReturnedOn` NULL, `Status` TEXT (`Open`/`Lost`/`Closed`), `LoanDays` | PK `Id`; **FK** `CopyId → Copies.Id` **ON DELETE RESTRICT**; індекси `CopyId`, `ReaderId` |
+```razor
+<Routes @rendermode="PageRenderMode" />
+@code {
+    private static readonly IComponentRenderMode PageRenderMode = new InteractiveServerRenderMode(prerender: false);
+}
+```
 
-`IsbnKey` — це ISBN без дефісів. Унікальний індекс стоїть на ньому, а не на `Isbn`, бо `978-0-13-235088-4` і `9780132350884` — одне видання (у домені так само міркує `Book.HasIsbn`). `COLLATE NOCASE` на ключах зберігає поведінку `InMemoryBookStore` (`b-001` = `B-001`).
+`prerender: false` — сторінка не рендериться двічі (статично, а потім інтерактивно), тому Api викликається один раз на відкриття, і користувач бачить стан «Завантаження…». Окремий `@rendermode InteractiveServer` на сторінках не потрібен: він уже успадковується від `Routes`.
+
+**Чому Server, а не WebAssembly.** Server-режим не потребує завантаження .NET-рантайму в браузер, а `HttpClient` звертається до Api з сервера. Адреса Api, тайм-аути й логування лишаються на сервері. Мінус — потрібне постійне з'єднання SignalR (його розрив показує `ReconnectModal`), а кожна взаємодія — це мережевий обмін із сервером Web.
+
+### 2. Структура і залежності
+
+```
+src/
+├── Contracts/                 ← НОВЕ (дод. 3): DTO HTTP-контракту, без жодних залежностей
+│   ├── BookDto.cs, SaveBookRequest.cs, PagedResponse.cs   ← перенесено з src/Api/Contracts (JSON той самий)
+│   └── BookSort.cs                                        ← допустимі значення ?sort=
+├── Api/                       ← + CORS (Cors:WebOrigin), + ?sort=, + посилання на Contracts
+├── Core/                      ← CatalogService.SearchAsync: сортування до пагінації (CatalogSortField)
+├── Infrastructure/            ← без змін
+├── Cli/                       ← без змін
+└── Web/                       ← НОВЕ: Blazor Web App, Interactive Server
+    ├── Program.cs                     ← AddHttpClient<BooksApiClient>(BaseAddress з Api:BaseUrl)
+    ├── appsettings.json               ← "Api": { "BaseUrl": "http://localhost:5080", "TimeoutSeconds": 10 }
+    ├── Contracts/BookModel.cs         ← модель форми + Data Annotations (для зручності)
+    ├── Contracts/ApiResult.cs         ← ApiResult, ValidationProblemResponse
+    ├── Contracts/BookListRequest.cs   ← author/sort/page → query-рядок
+    ├── Services/BooksApiClient.cs     ← List/Find/Create/Update/Delete/Ping, розбір 400/404/409/збоїв
+    └── Components/
+        ├── App.razor                  ← глобальний InteractiveServer (prerender: false)
+        ├── Layout/MainLayout.razor    ← адреса Api і посилання на Scalar беруться з BooksApiClient.BaseAddress
+        └── Pages/Home.razor, Books.razor, BookEdit.razor
+tests/Web.Tests/               ← НОВЕ: 38 тестів (клієнт, bUnit-сторінки, наскрізні з Api, архітектура)
+```
+
+`Web` → `Contracts` — єдине посилання. Ні `Core`, ні `Infrastructure`, ні EF Core чи рядка підключення у Web немає (тести `WebProject_ReferencesOnlyContracts`, `WebAssembly_DoesNotLoadDataAccess`, `WebAppsettings_HasApiBaseUrl_AndNoConnectionString`).
+
+### 3. Типізований HttpClient і конфігурація
 
 ```csharp
-// src/Infrastructure/Persistence/AppDbContext.cs (фрагмент)
-book.HasIndex(b => b.IsbnKey).IsUnique();
-book.HasMany(b => b.Copies).WithOne(c => c.Book)
-    .HasForeignKey(c => c.BookId).IsRequired()
-    .OnDelete(DeleteBehavior.Cascade);
-copy.HasMany(c => c.Loans).WithOne(l => l.Copy)
-    .HasForeignKey(l => l.CopyId).IsRequired()
-    .OnDelete(DeleteBehavior.Restrict);
+// src/Web/Program.cs
+var apiBaseUrl = builder.Configuration["Api:BaseUrl"]
+    ?? throw new InvalidOperationException("Не задано Api:BaseUrl (appsettings.json або змінна Api__BaseUrl).");
+builder.Services.AddHttpClient<BooksApiClient>(client =>
+{
+    client.BaseAddress = apiBaseUri;   // http://localhost:5080/ — зі слешем, відносні "api/books" додаються до нього
+    client.Timeout = apiTimeout;       // Api:TimeoutSeconds
+});
 ```
 
-### 3. Реєстрація в DI (єдине, що змінилося для маршрутів)
+У жодному `.razor` / `.cs` файлі Web немає `localhost` чи порту Api — це перевіряє тест `WebSources_HaveNoHardcodedApiAddress`. Навіть посилання «Scalar UI» у шапці будується від `BooksApiClient.BaseAddress`.
 
-```csharp
-builder.Services.AddDbContext<AppDbContext>((sp, o) => o.UseSqlite(SqliteConnectionStrings.Resolve(
-    sp.GetRequiredService<IConfiguration>().GetConnectionString("AppDb"),
-    sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath)));      // Scoped
-builder.Services.AddScoped<EfBookStore>();
-builder.Services.AddScoped<IBookStore>(sp => sp.GetRequiredService<EfBookStore>());
-builder.Services.AddScoped<IBookStoreAsync>(sp => sp.GetRequiredService<IBookStore>().AsAsync());
-builder.Services.AddSingleton<CatalogWriteGate>();
-builder.Services.AddScoped(sp => new CatalogService(sp.GetRequiredService<IBookStoreAsync>(),
-                                                    sp.GetRequiredService<CatalogWriteGate>()));
-```
+### 4. Сторінки, маршрути, виклики Api
 
-| Сервіс | Тиждень 10 | Тиждень 11 | Чому |
-| :----- | :--------- | :--------- | :--- |
-| `AppDbContext` | — | **Scoped** | Не потокобезпечний; одиниця роботи одного запиту |
-| `IBookStore` / `IBookStoreAsync` | Singleton (`SynchronizedBookStore`) | **Scoped** (`EfBookStore`) | Живе поверх `DbContext`; дані тепер у файлі, а не в об'єкті |
-| `CatalogService` | Singleton | **Scoped** | Singleton над Scoped був би «полоненою залежністю» |
-| `CatalogWriteGate` | (поле сервісу) | **Singleton** | Один замок на процес; між процесами захищають UNIQUE і транзакція |
+| Сторінка | Маршрут UI | Виклик Api | Код відповіді |
+| :------- | :--------- | :--------- | :------------ |
+| Головна (стан Api) | `/` | `GET /health` | 200 / немає відповіді → «Api недоступний…» |
+| Список видань | `/books` | `GET /api/books?page=1&pageSize=10` | 200 |
+| Пошук за автором | `/books` (поле пошуку) | `GET /api/books?author=шевч&page=1&pageSize=10` | 200 (`total: 0` → «Видань автора … не знайдено.») |
+| Сортування | `/books` (клік по заголовку / список) | `GET /api/books?sort=-year&…` | 200; невідомий `sort` → 400 |
+| Створення | `/books/new` → «Зберегти» | `POST /api/books` | 201 → перехід на `/books`; 400; 409 (дубль ISBN) |
+| Редагування (завантаження) | `/books/{id}` | `GET /api/books/{id}` | 200; 404 → «Видання з id … не знайдено (404)» |
+| Редагування (збереження) | `/books/{id}` → «Зберегти» | `PUT /api/books/{id}` | 200; 400; 404; 409 |
+| Видалення | `/books` → «Видалити» → підтвердження | `DELETE /api/books/{id}` | 204 → список перечитано; 409 (є видачі); 404 |
 
-### 4. Перевірка збереження між запусками (крок 8)
+Журнал Api під час сценарію захисту (`Logging__LogLevel__Microsoft.AspNetCore.Hosting.Diagnostics=Information`), скорочено:
 
 ```text
-$ rm src/Api/data/app.db; dotnet ef database update --project src/Infrastructure --startup-project src/Api
-Applying migration '20261116173406_InitialCreate'.
-Applying migration '20261116173414_AddLoans'.
-Done.
-$ sqlite3 src/Api/data/app.db ".tables"
-Books                  Loans                  __EFMigrationsLock
-Copies                 __EFMigrationsHistory
-
-$ dotnet run --project src/Api        # Development: Migrate() + сідування 19 видань
-$ curl -i -X POST http://localhost:5080/api/books -H "Content-Type: application/json" --data-binary @samples/api/book.json
-HTTP/1.1 201 Created
-Location: /api/books/B-111ebbad
-{"id":"B-111ebbad","isbn":"978-617-12-3456-7","title":"Кобзар","author":"Тарас Шевченко","year":1840,"copies":2,"available":2}
-$ curl -i -X POST ... (той самий ISBN)
-HTTP/1.1 409 Conflict
-{"title":"Операція суперечить правилам бібліотеки.","status":409,"detail":"Видання з ISBN 978-617-12-3456-7 уже є в каталозі: B-111ebbad.", …}
-
-$ sqlite3 -header -column src/Api/data/app.db "SELECT Id, BookId, IsIssued, RegisteredAt FROM Copies WHERE BookId='B-111ebbad'"
-Id          BookId      IsIssued  RegisteredAt
-C-b4760ead  B-111ebbad  0         2026-11-16 17:37:55.1479695+00:00
-C-f0f72d26  B-111ebbad  0         2026-11-16 17:37:55.149637+00:00
-
-# Ctrl+C, повторний dotnet run --project src/Api
-$ curl -i http://localhost:5080/api/books/B-111ebbad
-HTTP/1.1 200 OK
-{"id":"B-111ebbad","isbn":"978-617-12-3456-7","title":"Кобзар","author":"Тарас Шевченко","year":1840,"copies":2,"available":2}
-$ curl -s "http://localhost:5080/api/books?pageSize=1"
-{"items":[…],"total":20,"page":1,"pageSize":1}     ← 19 стартових + 1 новий, сідування не повторилося
+GET    /api/books?page=1&pageSize=10        - 200     ← порожній список
+POST   /api/books                           - 201     ← форма «Кобзар»
+GET    /api/books/B-febbd3f8                - 200     ← відкрито форму редагування
+PUT    /api/books/B-febbd3f8                - 200
+POST   /api/books                           - 400     ← невалідна форма
+POST   /api/books                           - 409     ← дубль ISBN
+GET    /api/books/B-404                     - 404
+GET    /api/books?sort=-year&page=1&pageSize=10 - 200
+GET    /api/books?author=%D1%88%D0%B5%D0%B2%D1%87&sort=-year&page=1&pageSize=10 - 200
+DELETE /api/books/B-c3eef009                - 204
 ```
 
-### 5. Чому міграції, а не `EnsureCreated`
+### 5. Обробка помилок
 
-`EnsureCreated` уміє лише одне: створити схему в порожній БД за поточною моделлю. Якщо таблиці вже є, він нічого не робить і про зміни моделі не знає, тому додати `Loans` до бази, де вже лежать видання, він не зможе: доведеться видаляти файл разом з даними. Міграція — це клас з `Up` (перехід до нової версії схеми) і `Down` (відкат). Номер застосованої версії записується в `__EFMigrationsHistory`, тож `database update` на будь-якій копії (чистій, вчорашній, продакшен) виконує лише ті кроки, яких там ще немає. Ми це й побачили: `AddLoans` додав одну таблицю, не чіпаючи `Books`/`Copies` з даними. Тест `MigrateDown_ToInitialCreate_DropsOnlyLoans` перевіряє відкат. Міграції — це код, який проходить рев'ю в git разом з моделлю, і з них можна згенерувати SQL-скрипт для адміністратора. `EnsureCreated` годиться для прототипів і одноразових тестових баз, але в одному проєкті з міграціями його не використовують: створена ним база не має історії, і `Migrate` спробує створити таблиці ще раз.
+| Ситуація | Що повертає `BooksApiClient` | Що бачить користувач |
+| :------- | :--------------------------- | :------------------- |
+| Api не запущений / мережа | `HttpRequestException` → `ApiUnavailableException` (читання) або `ApiResult(false, …)` (зміни) | «Api недоступний. Перевірте, чи запущено src/Api.» + кнопка «Повторити» |
+| Api завис довше `Api:TimeoutSeconds` | тайм-аут `HttpClient` → те саме | «Api не відповів вчасно (Api:TimeoutSeconds).» |
+| 404 на `GET /api/books/{id}` | `null` (не виняток) | «Видання з id «B-404» не знайдено (404)…» замість форми |
+| 404 на PUT/DELETE | `ApiResult(false, "Запис не знайдено…")` | загальне повідомлення |
+| 400 ValidationProblem | `ApiResult(false, "Дані не пройшли перевірку.", errors)` | загальний список «Поле: текст» + повідомлення під кожним полем (`ValidationMessageStore`) |
+| 409 Conflict | `ApiResult(false, detail)` | окреме жовте повідомлення над формою, біля полів нічого |
+| 5xx | `ApiResult(false, "Сервер повернув 500.")` | загальне повідомлення |
+| користувач пішов зі сторінки | `OperationCanceledException` | нічого (запит скасовано, не помилка) |
 
-### 6. Самоперевірка
+Ключі словника `errors` з Api (`Isbn`, `Title`, `Year`, `Copies`) збігаються з іменами властивостей `BookModel`, тож `BookEdit` кладе кожне повідомлення у `ValidationMessageStore` для поля з тим самим іменем. Коли користувач змінює поле, серверна помилка біля нього зникає.
+
+**Клієнтська і серверна валідація.** `BookModel` має Data Annotations лише для простих речей (обов'язкові ISBN і назва, довжини, `0 ≤ copies ≤ 100`). Формат ISBN, межі року (`1450..поточний`) і унікальність ISBN перевіряє тільки сервер, правило одне (FluentValidation в Api + Core). Прапорець «Перевіряти на клієнті» на формі вимикає `DataAnnotationsValidator`, щоб на захисті показати, що невалідна форма доходить до Api і отримує 400 з переліком полів.
+
+### 6. CORS
+
+```csharp
+// src/Api/Program.cs
+var webOrigins = (builder.Configuration["Cors:WebOrigin"] ?? "http://localhost:5090")
+    .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+builder.Services.AddCors(o => o.AddPolicy("web", p => p
+    .WithOrigins(webOrigins).AllowAnyHeader().AllowAnyMethod().WithExposedHeaders("Location")));
+...
+app.UseCors("web"); // до app.MapBooks()
+```
+
+**Кому він потрібен.** CORS — механізм браузера: скрипт сторінки з origin `A` (схема + хост + порт) може прочитати відповідь з origin `B`, лише якщо `B` відповів `Access-Control-Allow-Origin: A`. Для запитів з JSON-тілом (POST/PUT) браузер спершу надсилає preflight `OPTIONS`. Це потрібно **Blazor WebAssembly** чи будь-якому SPA, де `HttpClient`/`fetch` виконується в браузері на `http://localhost:5090`, а Api на `http://localhost:5080`.
+
+**Кому не потрібен.** У режимі Interactive Server запит до Api робить процес Web на сервері (`HttpClient` → Api), браузер у ньому не бере участі, тож CORS не застосовується. Scalar працює без CORS, бо `/scalar/v1` віддає сам Api (той самий origin). `curl` і інші сервери заголовки CORS ігнорують, тому **CORS не захищає Api**: він не замінює автентифікацію, авторизацію і валідацію.
+
+Перевірка в браузері (Edge, той самий `fetch('http://localhost:5080/api/books?pageSize=1')` з консолі двох сторінок):
+
+```text
+з http://localhost:5090  → OK 200 {"items":[{"id":"B-05f15037", ...
+з http://127.0.0.1:5090  → TypeError: Failed to fetch
+  [console] Access to fetch at 'http://localhost:5080/api/books?pageSize=1' from origin 'http://127.0.0.1:5090'
+            has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+```
+
+`localhost` і `127.0.0.1` — різні origin, хоч це та сама машина. У журналі Api видно, що обидва запити дійшли і отримали 200: браузер заблокував не запит, а **читання відповіді** скриптом. Тести: `Preflight_FromWebOrigin_IsAllowed`, `Request_FromOtherOrigin_HasNoAllowOriginHeader`, `Conflict_FromWebOrigin_StillHasCorsHeaders` (409 теж із заголовком, інакше WASM-клієнт не прочитав би `detail`), `CorsOrigin_ComesFromConfiguration`.
+
+### 7. Спільний проєкт Contracts (дод. завдання 3)
+
+`BookDto`, `SaveBookRequest`, `PagedResponse<T>` перенесено з `src/Api/Contracts` у `src/Contracts` (namespace `CrossApp.Contracts`). Api і Web посилаються на нього, а сам він не залежить ні від чого. JSON-контракт не змінився, 21 тест Api тижнів 10–11 проходить без змін тіл.
+
+| Плюси | Мінуси |
+| :---- | :----- |
+| Розбіжність імен чи типів полів — помилка компіляції, а не «порожня таблиця без помилок» | Web і Api зв'язані на рівні збірки: зміна DTO вимагає перезбирання й одночасного розгортання обох |
+| Один список `BookSort.Allowed` для валідатора Api і випадаючого списку Web | Спокуса покласти туди доменні типи чи правила — тоді клієнт почне «знати» бізнес-логіку |
+| Менше дубльованого коду для простих record-DTO | Не підходить стороннім клієнтам (JS, мобільний): для них контракт — лише OpenAPI |
+| | Версіонування API ускладнюється: старий клієнт з новою збіркою Contracts уже не «старий» |
+
+Тому в `Contracts` лише форма повідомлень, без атрибутів валідації і без посилань на Core. Модель форми `BookModel` (змінний клас із Data Annotations) лишилася у Web: це стан UI, а не контракт.
+
+### 8. Скриншоти
+
+| Файл | Що показує |
+| :--- | :--------- |
+| [02-empty-list.png](docs/lab12/02-empty-list.png) | `/books` до створення: «Записів ще немає.» |
+| [04-list-after-create.png](docs/lab12/04-list-after-create.png) | після збереження форми: `978-617-12-3456-7 \| Кобзар \| Тарас Шевченко \| 1840 \| 2` |
+| [06-list-after-edit.png](docs/lab12/06-list-after-edit.png) | після редагування: «Кобзар (1840)», 3 примірники |
+| [08-validation-server.png](docs/lab12/08-validation-server.png) | 400 від Api: помилки `Isbn`, `Title`, `Year`, `Copies` біля полів і списком |
+| [09-validation-isbn-server-only.png](docs/lab12/09-validation-isbn-server-only.png) | правило лише на сервері: ISBN «12-34» |
+| [10-conflict-409.png](docs/lab12/10-conflict-409.png) | 409: дубль ISBN — загальне повідомлення |
+| [11-not-found-404.png](docs/lab12/11-not-found-404.png) | `/books/B-404` |
+| [13-sort-year-desc.png](docs/lab12/13-sort-year-desc.png), [14-search-author.png](docs/lab12/14-search-author.png) | сортування і пошук на сервері |
+| [16-delete-confirm.png](docs/lab12/16-delete-confirm.png), [17-after-delete.png](docs/lab12/17-after-delete.png), [23-delete-conflict-409.png](docs/lab12/23-delete-conflict-409.png) | видалення з підтвердженням; відмова 409 |
+| [18-api-down-list.png](docs/lab12/18-api-down-list.png), [19-api-down-form.png](docs/lab12/19-api-down-form.png) | зупинений Api |
+| [21-seeded-sort-copies.png](docs/lab12/21-seeded-sort-copies.png) | засіяний каталог: жовтим — усі примірники видано, пагінація 1 з 3 |
+
+![Список після створення запису](docs/lab12/04-list-after-create.png)
+
+### 9. Самоперевірка
 
 | Питання | Результат |
 | :------ | :-------- |
-| У `Core.csproj` немає пакетів EF Core? | Так, немає жодного `PackageReference` (тест `Core_DoesNotDependOnEntityFramework`) |
-| `Migrations` у git, `data/app.db` — ні? | Так, `git status` не показує `app.db`: у `.gitignore` є `**/data/`, `*.db`, `*.db-shm`, `*.db-wal` |
-| Видалили `app.db` → `database update` відтворив схему без правок коду? | Так (розділ 4; тест `Migrate_OnEmptyFile_CreatesTablesAndHistory`) |
-| Дані живуть після перезапуску; `Book` відновлюється через `Book.Create`? | Так (розділ 4; `RowMapping.ToDomain`; тести `Data_SurvivesApiRestart`, `CorruptedRow_FailsInBookCreate_NotSilently`) |
-| Повторний POST з тим самим ISBN — керована помилка, а не 500? | 409 (розділ 4; тест `ConcurrentPosts_SameIsbn_OneCreated_Rest409`) |
-| Маршрути тижня 10 не змінилися? | Так: `BookEndpoints.cs`, DTO і валідатори без змін, 18 старих тестів Api проходять |
+| У `.razor` і `.cs` файлах Web немає жодного localhost-літерала? | Так (тест `WebSources_HaveNoHardcodedApiAddress`; адреса лише в `appsettings.json`) |
+| Web не має reference на Infrastructure і не бачить рядка підключення? | Так: єдине посилання — `Contracts` (тести `WebProject_ReferencesOnlyContracts`, `WebAssembly_DoesNotLoadDataAccess`) |
+| Створений через UI запис видно в Scalar, а створений у Scalar — в UI? | Так: «Кобзар» з форми повертає `curl /api/books`; 5 видань, створених прямими POST до Api, з'явилися в таблиці (`12-list-full.png`) |
+| Дані живуть після перезапуску Api? | Так: після зупинки й повторного запуску Api на тому самому `demo.db` `GET /api/books` повернув ті самі 5 видань |
+| Зупинений Api дає зрозуміле повідомлення, а невалідна форма — помилки полів? | Так (`18-api-down-list.png`, `08-validation-server.png`) |
 
-### 7. Definition of Done (Лабораторна робота 11)
+### 10. Definition of Done (Лабораторна робота 12)
 
-1. `InitialCreate` (і `AddLoans`) у git; `database update` на чистій копії працює.
-2. CRUD Api читає і пише в SQLite, дані живуть між запусками.
-3. 1:N описаний у Fluent API і видимий у міграції (`FK_Copies_Books_BookId`, `ON DELETE CASCADE`).
-4. Рядок підключення взято з `ConnectionStrings:AppDb`, шлях будується через `Path.Combine` від `ContentRootPath`.
-5. `DbContext` Scoped, сховище реалізує інтерфейс з Core, у Core немає EF Core.
-6. `*.db` у `.gitignore`, README з командами; `dotnet build` (0 попереджень) і `dotnet test` (95/95) зелені; коміт `lab11`.
+1. Список записів з Api; створення, редагування і видалення працюють end-to-end до SQLite (тест `FullScenario_AgainstRealApi`, сценарій у браузері).
+2. Обробка 400, 404, 409 і недоступного Api видима користувачеві (розділ 5, скриншоти).
+3. Базова адреса Api (`Api:BaseUrl`) і CORS-origin (`Cors:WebOrigin`) — у конфігурації та README.
+4. Режим Blazor — Interactive Server, названий і пояснений (розділ 1); Web не залежить від Infrastructure.
+5. `dotnet build` — 0 попереджень, `dotnet test` — 144/144; коміт `lab12`.
 
-### 8. Відповіді на питання на захисті
+### 11. Відповіді на питання на захисті
 
-1. **DbContext і Scoped.** Одиниця роботи: з'єднання з БД, трекер змін завантажених сутностей і формування SQL на `SaveChanges`. Він не потокобезпечний: два паралельні запити через один екземпляр дають «A second operation was started on this context». Scoped дає кожному HTTP-запиту власний контекст, а кеш трекера не росте весь час роботи застосунку.
-2. **Міграції vs `EnsureCreated`** — розділ 5.
-3. **Клас міграції.** `Up` містить `CreateTable` / `AddColumn` / `CreateIndex`, `Down` робить зворотні дії (`DropTable`), `.Designer.cs` зберігає знімок моделі на момент міграції, а `AppDbContextModelSnapshot` — поточний (з ним порівнюється наступний `migrations add`). `__EFMigrationsHistory` — список застосованих `MigrationId`, за ним `update` вирішує, що ще треба виконати.
-4. **LINQ to Entities vs LINQ to Objects.** Перший працює з `IQueryable`: дерево виразів провайдер перекладає в SQL, і фільтр виконується в SQLite. Другий працює з `IEnumerable` у пам'яті. В `EfBookStore` `Where/OrderBy/Select` (з JOIN `Copies ⋈ Books`) виконуються в БД, а після `ToList` перетворення `RowMapping.ToDomain` працює як LINQ to Objects, бо фабрику домену в SQL не перекласти.
-5. **Чому `BookRow`, а не `Book`.** `Book` має приватний конструктор, get-only властивості й перевірки в `Create`. Щоб EF мапив його напряму, довелося б послабити домен або заповнювати поля рефлексією в обхід інваріантів. `BookRow` — простий клас із сетерами й навігацією `Copies`, а повернення в домен іде лише через `Book.Create`, тож зіпсований рядок дає виняток, а не невалідний об'єкт.
-6. **AsNoTracking.** Його варто вживати, коли рядок лише читається для побудови DTO чи доменного об'єкта (усі `List`/`GetById`). Він вимикає реєстрацію сутностей у ChangeTracker і знімки для виявлення змін, тож читання швидше й займає менше пам'яті, але такі об'єкти не можна просто змінити й зберегти через `SaveChanges`.
-7. **1:N у Fluent API.** `HasMany(b => b.Copies).WithOne(c => c.Book).HasForeignKey(c => c.BookId)`. `DeleteBehavior.Cascade` означає, що видалення видання видаляє і його примірники (у схемі `ON DELETE CASCADE`). Для видач обрано `Restrict`, бо історію видавання не можна стирати мовчки.
-8. **Файл БД vs міграції.** `app.db` — це дані конкретної машини: бінарний файл, який не зливається в git і відтворюється командою `database update`. Міграції — це код схеми, однаковий для всіх, тому вони в git. `SaveChanges` переглядає трекер, генерує INSERT/UPDATE/DELETE для доданих, змінених і видалених сутностей і виконує їх в одній транзакції.
+1. **Server vs WebAssembly.** У Server компоненти виконуються на сервері, браузер — «тонкий термінал» через SignalR. У WebAssembly .NET-рантайм і DLL завантажуються в браузер, код виконується там, а дані йдуть через `HttpClient`/`fetch` з браузера (тому потрібен CORS). Обрано **Interactive Server** (розділ 1).
+2. **Де виконується код і що йде мережею.** C# — у процесі Web на сервері. Мережею між браузером і Web передаються події UI і бінарні різниці DOM через WebSocket `/_blazor`. Між Web і Api йдуть звичайні HTTP-запити з JSON (сервер → сервер).
+3. **`@rendermode`.** Директива або атрибут, що вибирає, де і чи інтерактивно рендериться компонент: Static SSR, InteractiveServer, InteractiveWebAssembly, InteractiveAuto. З .NET 8 шаблон `blazor` — це один Blazor Web App з кількома режимами, тому режим треба вказати явно (у нас глобально на `<Routes>`). Без нього кнопки на сторінці не реагують: це статичний HTML.
+4. **CORS і Scalar.** CORS дозволяє скрипту з іншого origin читати відповіді Api. Scalar віддає сам Api з того самого origin, тому CORS не потрібен (розділ 6).
+5. **Типізований HttpClient.** `IHttpClientFactory` перевикористовує пул `HttpMessageHandler`: немає вичерпання сокетів від `new HttpClient()` у кожному компоненті і застарілого DNS від одного вічного клієнта. Базова адреса, тайм-аут і логування налаштовуються в одному місці, а сторінка отримує готовий `BooksApiClient` через `@inject` (у тестах його легко підмінити `StubApi`).
+6. **Чому адреса Api не в коді сторінки.** Вона різна для розробки, тестів і розгортання (тиждень 14). У конфігурації її змінює змінна середовища без перезбирання, а в `.razor` довелося б правити й перекомпілювати кожну сторінку.
+7. **Як показується 400.** `BooksApiClient` читає `ValidationProblem` (`errors: { "Isbn": [...] }`) у `ApiResult.Errors`. `BookEdit` кладе кожен ключ у `ValidationMessageStore` для поля `BookModel` з тим самим іменем, тому `<ValidationMessage For="() => model.Isbn" />` показує його під полем. Плюс загальний список «Поле: текст» над формою.
+8. **Клієнтська валідація і БД.** Клієнтську перевірку можна вимкнути (у нас прапорцем) або обійти `curl`-ом, тому вона лише економить запит і дає швидкий відгук. Правила, яких немає на клієнті (формат ISBN, межі року, унікальність), усе одно перевіряє сервер. Якби Web працював з БД напряму, кожне правило довелося б дублювати, і два клієнти розійшлися б. Api лишається єдиним джерелом достовірних даних і місцем виконання правил.
+9. **`OnInitializedAsync` vs `OnParametersSetAsync`.** Перший викликається один раз при створенні компонента (`Books`: параметрів немає). Другий — після кожного встановлення параметрів, зокрема коли Blazor перевикористовує той самий екземпляр для іншого `{Id}` (`/books/B-1` → `/books/B-2`). Тому `BookEdit` вантажить видання в `OnParametersSetAsync` (тест `ChangingRouteId_ReloadsBook`).
 
-### 9. Що змінилося в коді попередніх лабораторних
+### 12. Що змінилося в коді попередніх лабораторних
 
-- `CatalogService` працює над `IBookStoreAsync` і кожну зміну загортає в `InTransactionAsync`. Замок винесено в `CatalogWriteGate`. Конструктор `CatalogService(IBookStore)` лишився (через `SyncBookStoreAdapter`), тому тести Core не змінено.
-- `Api/CatalogOptions`: прибрано вибір `Memory | File`, лишився `Seed`. У `appsettings.json` секцію `Storage` замінено на `ConnectionStrings:AppDb` і `Database:MigrateOnStartup`.
-- `Api.Tests`: `new WebApplicationFactory<Program>()` → `new ApiFactory()` (тимчасовий файл SQLite на тест). Тіла 18 тестів тижня 10 не змінилися.
-- `SynchronizedBookStore`, `InMemoryBookStore`, `FileBookStore` і Cli не змінювалися; Cli, як і раніше, працює з файловим сховищем.
-- Опис лабораторної 10 перенесено в [README_lab10.md](README_lab10.md).
+- `src/Api/Contracts/BookDto.cs`, `SaveBookRequest.cs`, `PagedResponse.cs` → `src/Contracts` (namespace `CrossApp.Contracts`, `<Using Include="CrossApp.Contracts" />` в `Api.csproj` і `Api.Tests.csproj`). JSON без змін.
+- `Api/Program.cs`: `AddCors` + `UseCors("web")`; `appsettings.json`: секція `Cors:WebOrigin`.
+- `BookListQuery` + `sort`, `BookListQueryValidator` перевіряє його за `BookSort.Allowed`, `BookMapping.ToQuery` перетворює `-year` на `(CatalogSortField.Year, Descending)`.
+- `Core/CatalogService.SearchAsync`: сортування за назвою/автором/роком/кількістю примірників до пагінації. `CatalogQuery` отримав `SortBy`, `Descending` зі значеннями за замовчуванням, тому старі виклики й тести не змінилися.
+- Нові тести: 3 у `Core.Tests` (сортування), 8 у `Api.Tests/WebClientSupportTests.cs` (CORS, `?sort=`), новий проєкт `tests/Web.Tests` (38).
+- Опис лабораторної 11 перенесено в [README_lab11.md](README_lab11.md).

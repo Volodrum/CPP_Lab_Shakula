@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Тиждень 12, дод. завдання 3: спільні DTO HTTP-контракту для Api і Web.
+       Жодних посилань: ні Core, ні ASP.NET, ні EF — лише форма JSON-повідомлень. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrossApp.Contracts</RootNamespace>
+  </PropertyGroup>
+
+</Project>
