@@ -30,6 +30,11 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         // Pooling=False: після Dispose файл одразу звільняється і його можна видалити.
         builder.UseSetting("ConnectionStrings:AppDb", $"Data Source={DatabasePath};Pooling=False");
         builder.UseSetting("Database:MigrateOnStartup", "true");
+        // Тиждень 12: тести не залежать від змінних середовища термінала. Після демонстрації з
+        // $env:Catalog__Seed="false" чи іншим $env:Cors__WebOrigin у тій самій сесії PowerShell
+        // тести, що чекають засіяного каталогу (B-001) і origin Web, падали б. Тому значення закріплено тут.
+        builder.UseSetting("Catalog:Seed", "true");
+        builder.UseSetting("Cors:WebOrigin", "http://localhost:5090");
     }
 
     protected override void Dispose(bool disposing)
